@@ -1,0 +1,39 @@
+# Развёртывание на сервере: MCP за Caddy, который сам выпускает TLS-сертификат.
+#
+# Сам oura-mcp наружу не публикуется — только Caddy. Порт 8000 остаётся внутри
+# сети Docker, поэтому единственный путь снаружи проходит через TLS.
+
+services:
+  oura-mcp:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # На сервере часовой пояс обязателен: системный там UTC, и без этого
+      # «сон за вчера» вернёт не ту ночь.
+      OURA_TZ: ${OURA_TZ:-Europe/Moscow}
+      OURA_API_MODE: ${OURA_API_MODE:-production}
+    volumes:
+      - oura-data:/data
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      OURA_DOMAIN: ${OURA_DOMAIN:?укажи OURA_DOMAIN в .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - oura-mcp
+
+volumes:
+  oura-data:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,15 @@
+.env
+.env.local
+.oura/
+.venv/
+.git/
+.github/
+tests/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.db
+*.sqlite3
+*.tokens.json
+.DS_Store

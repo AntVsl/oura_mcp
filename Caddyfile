@@ -1,0 +1,19 @@
+# Caddy сам получает и продлевает сертификат Let's Encrypt для OURA_DOMAIN.
+# Домен должен A-записью указывать на этот сервер до первого запуска.
+
+{$OURA_DOMAIN} {
+	encode zstd gzip
+
+	# Проверка Bearer-токена живёт в самом приложении, здесь её дублировать не надо.
+	reverse_proxy oura-mcp:8000 {
+		# MCP держит длинные потоки ответов — с коротким таймаутом они рвутся.
+		flush_interval -1
+	}
+
+	log {
+		# Заголовок Authorization в логи попадать не должен.
+		format filter {
+			request>headers>Authorization delete
+		}
+	}
+}
