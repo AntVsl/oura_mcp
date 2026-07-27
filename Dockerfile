@@ -12,9 +12,15 @@ COPY src/ ./src/
 RUN uv pip install --system --no-cache .
 
 # Токены и кэш живут в томе, а не в образе.
-RUN mkdir -p /data && useradd -r -u 1000 oura && chown -R oura /data /app
+# Без -r: это не системная учётка, а обычная. С -r useradd ругается, что uid
+# 1000 выше SYS_UID_MAX, и берёт другой — а нам нужен предсказуемый владелец тома.
+RUN mkdir -p /data && useradd -u 1000 -M -s /usr/sbin/nologin oura \
+    && chown -R oura /data /app
 USER oura
 
+# docker build предупреждает про SecretsUsedInArgOrEnv из-за слова TOKEN в имени.
+# Это ложное срабатывание: здесь путь к файлу, а не секрет. Сами токены лежат
+# в томе /data и в образ не попадают.
 ENV OURA_TOKEN_STORE=/data/tokens.json \
     OURA_CACHE_DB=/data/cache.db \
     PYTHONUNBUFFERED=1

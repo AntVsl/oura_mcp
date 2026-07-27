@@ -1,6 +1,6 @@
 import pytest
 
-from oura_mcp.http import HEALTH_PATH, AuthError, BearerAuthMiddleware, resolve_token
+from oura_mcp.http import HEALTH_PATH, BearerAuthMiddleware, EndpointAuthError, resolve_token
 
 TOKEN = "s" * 32
 
@@ -11,7 +11,7 @@ TOKEN = "s" * 32
 def test_public_bind_without_token_refuses_to_start(monkeypatch):
     """Ключевая гарантия: наружу без секрета сервер не поднимется."""
     monkeypatch.delenv("OURA_MCP_TOKEN", raising=False)
-    with pytest.raises(AuthError, match="доступен снаружи"):
+    with pytest.raises(EndpointAuthError, match="доступен снаружи"):
         resolve_token("0.0.0.0")
 
 
@@ -22,7 +22,7 @@ def test_loopback_without_token_is_allowed(monkeypatch):
 
 def test_short_token_rejected(monkeypatch):
     monkeypatch.setenv("OURA_MCP_TOKEN", "korotkiy")
-    with pytest.raises(AuthError, match="короче"):
+    with pytest.raises(EndpointAuthError, match="короче"):
         resolve_token("0.0.0.0")
 
 

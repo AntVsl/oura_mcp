@@ -20,7 +20,7 @@ HEALTH_PATH = "/healthz"
 MIN_TOKEN_LEN = 16
 
 
-class AuthError(RuntimeError):
+class EndpointAuthError(RuntimeError):
     """Конфигурация доступа небезопасна — запускаться нельзя."""
 
 
@@ -96,7 +96,7 @@ def resolve_token(host: str) -> str | None:
 
     if not token:
         if exposed:
-            raise AuthError(
+            raise EndpointAuthError(
                 f"Сервер слушает {host}, то есть доступен снаружи, но "
                 "OURA_MCP_TOKEN не задан — эндпоинт отдавал бы медданные любому.\n"
                 "Сгенерируй секрет и добавь его в .env:\n"
@@ -105,7 +105,7 @@ def resolve_token(host: str) -> str | None:
         return None
 
     if len(token) < MIN_TOKEN_LEN:
-        raise AuthError(
+        raise EndpointAuthError(
             f"OURA_MCP_TOKEN короче {MIN_TOKEN_LEN} символов — такой секрет "
             "перебирается. Сгенерируй новый: "
             "python3 -c \"import secrets;print(secrets.token_urlsafe(32))\""
