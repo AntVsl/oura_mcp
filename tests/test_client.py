@@ -5,8 +5,8 @@ import httpx
 import pytest
 import respx
 
-from ouraring_mcp.client import OuraClient, OuraError
-from ouraring_mcp.config import SANDBOX_BASE, Settings
+from my_oura_mcp.client import OuraClient, OuraError
+from my_oura_mcp.config import SANDBOX_BASE, Settings
 
 START, END = date(2026, 1, 1), date(2026, 1, 7)
 
@@ -52,7 +52,7 @@ async def test_repeated_next_token_does_not_loop():
 
 @respx.mock
 async def test_retries_on_transport_error(monkeypatch):
-    monkeypatch.setattr("ouraring_mcp.client.OuraClient._sleep", _no_sleep)
+    monkeypatch.setattr("my_oura_mcp.client.OuraClient._sleep", _no_sleep)
     route = respx.get(f"{SANDBOX_BASE}/daily_sleep")
     route.side_effect = [
         httpx.ConnectError("оборвалось"),
@@ -63,7 +63,7 @@ async def test_retries_on_transport_error(monkeypatch):
 
 @respx.mock
 async def test_retries_on_server_error(monkeypatch):
-    monkeypatch.setattr("ouraring_mcp.client.OuraClient._sleep", _no_sleep)
+    monkeypatch.setattr("my_oura_mcp.client.OuraClient._sleep", _no_sleep)
     route = respx.get(f"{SANDBOX_BASE}/daily_sleep")
     route.side_effect = [
         httpx.Response(503),
@@ -74,7 +74,7 @@ async def test_retries_on_server_error(monkeypatch):
 
 @respx.mock
 async def test_gives_up_after_max_attempts(monkeypatch):
-    monkeypatch.setattr("ouraring_mcp.client.OuraClient._sleep", _no_sleep)
+    monkeypatch.setattr("my_oura_mcp.client.OuraClient._sleep", _no_sleep)
     respx.get(f"{SANDBOX_BASE}/daily_sleep").mock(side_effect=httpx.ConnectError("нет"))
     with pytest.raises(OuraError, match="соединение с Oura не установилось"):
         await fetch()
@@ -159,7 +159,7 @@ async def test_heartrate_uses_datetime_params():
 async def test_production_without_token_provider_explains_itself():
     prod = Settings(**{**settings().__dict__, "mode": "production"})
     async with OuraClient(prod) as client:
-        with pytest.raises(OuraError, match="ouraring-mcp auth"):
+        with pytest.raises(OuraError, match="my-oura-mcp auth"):
             await client.fetch("daily_sleep", START, END)
 
 

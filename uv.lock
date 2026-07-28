@@ -350,7 +350,7 @@ wheels = [
 ]
 
 [[package]]
-name = "ouraring-mcp"
+name = "my-oura-mcp"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

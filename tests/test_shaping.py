@@ -1,6 +1,6 @@
 import json
 
-from ouraring_mcp import shaping
+from my_oura_mcp import shaping
 
 # Формы взяты из живых ответов песочницы Oura.
 DAILY_SLEEP = [

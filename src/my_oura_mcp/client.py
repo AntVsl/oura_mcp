@@ -99,7 +99,7 @@ class OuraClient:
         if self._token_provider is None:
             raise OuraError(
                 "Режим production требует авторизации, но провайдер токена не задан. "
-                "Пройди OAuth: `uv run ouraring-mcp auth`"
+                "Пройди OAuth: `uv run my-oura-mcp auth`"
             )
         return await self._token_provider()
 
@@ -205,7 +205,7 @@ class OuraClient:
         if code == 401:
             hint = (
                 "токен истёк или отозван — пройди авторизацию заново: "
-                "`uv run ouraring-mcp auth`"
+                "`uv run my-oura-mcp auth`"
             )
         elif code == 403:
             scope = ENDPOINT_SCOPES.get(endpoint)

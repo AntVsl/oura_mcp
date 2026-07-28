@@ -1,4 +1,4 @@
-# ouraring-mcp
+# my-oura-mcp
 
 *Русская версия. Основной README — [английский](README.md).*
 
@@ -32,13 +32,13 @@ uv sync
 Проверка, что данные доходят (идёт в песочницу Oura, авторизация не нужна):
 
 ```bash
-uv run python -m ouraring_mcp.smoke
+uv run python -m my_oura_mcp.smoke
 ```
 
 Подключение к Claude Code:
 
 ```bash
-claude mcp add oura -- uv --directory /полный/путь/к/oura_mcp run ouraring-mcp
+claude mcp add oura -- uv --directory /полный/путь/к/oura_mcp run my-oura-mcp
 ```
 
 Затем в сессии: *«покажи сводку Oura за неделю»*. Инструмент `get_status`
@@ -85,7 +85,7 @@ claude mcp add oura -- uv --directory /полный/путь/к/oura_mcp run our
 **3. Пройди авторизацию** — один раз:
 
 ```bash
-uv run ouraring-mcp auth
+uv run my-oura-mcp auth
 ```
 
 Команда поднимет локальный сервер на адресе из `OURA_REDIRECT_URI`, откроет
@@ -97,8 +97,8 @@ uv run ouraring-mcp auth
 Вспомогательное:
 
 ```bash
-uv run ouraring-mcp auth --status   # авторизован ли, сколько живёт токен
-uv run ouraring-mcp auth --logout   # забыть токены
+uv run my-oura-mcp auth --status   # авторизован ли, сколько живёт токен
+uv run my-oura-mcp auth --logout   # забыть токены
 ```
 
 > Personal Access Token больше не подойдёт: Oura прекратила их выпуск в декабре
@@ -107,7 +107,7 @@ uv run ouraring-mcp auth --logout   # забыть токены
 > **Refresh-токен одноразовый.** При каждом обновлении Oura выдаёт новый и
 > аннулирует прежний, поэтому два сервера с общим хранилищем выбьют друг друга
 > из авторизации. Признак — `400` с сообщением про одноразовость: лечится
-> повторным `ouraring-mcp auth` и переходом на один живой экземпляр.
+> повторным `my-oura-mcp auth` и переходом на один живой экземпляр.
 
 ## Конфигурация
 
@@ -132,7 +132,7 @@ uv run ouraring-mcp auth --logout   # забыть токены
 ### Локально: Claude Code на этой машине
 
 ```bash
-claude mcp add --scope user oura -- uv --directory /путь/к/oura_mcp run ouraring-mcp
+claude mcp add --scope user oura -- uv --directory /путь/к/oura_mcp run my-oura-mcp
 ```
 
 `--scope user` делает сервер видимым из любого каталога; без него он
@@ -147,7 +147,7 @@ claude mcp list
 ### Локально по HTTP: отладка транспорта
 
 ```bash
-uv run ouraring-mcp --transport http --port 8000
+uv run my-oura-mcp --transport http --port 8000
 ```
 
 На loopback-адресе секрет не требуется. Здесь удобно воспроизводить то, что
@@ -225,7 +225,7 @@ claude mcp add --scope user --transport http oura https://твой-домен/mc
   разграничения между пользователями нет.
 - **Сервер не запустится на внешнем адресе без секрета** — вместо тихой отдачи
   медданных в открытый интернет он откажется стартовать. Проверить локально:
-  `uv run ouraring-mcp --transport http --host 0.0.0.0`.
+  `uv run my-oura-mcp --transport http --host 0.0.0.0`.
 - Путь `/healthz` открыт без токена намеренно — он нужен reverse proxy и не
   отдаёт ничего, кроме `ok`.
 - Заголовок `Authorization` вычищается из логов Caddy.

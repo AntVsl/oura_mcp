@@ -81,7 +81,7 @@ class TokenStore:
         except (OSError, ValueError, TypeError) as exc:
             raise AuthError(
                 f"Хранилище токенов {self.path} повреждено ({exc}). "
-                "Удали файл и пройди авторизацию заново: uv run ouraring-mcp auth"
+                "Удали файл и пройди авторизацию заново: uv run my-oura-mcp auth"
             ) from exc
 
     def save(self, tokens: Tokens) -> None:
@@ -121,7 +121,7 @@ class OuraOAuth:
             if tokens is None:
                 raise AuthError(
                     "Авторизация не пройдена — токенов нет.\n"
-                    "Запусти: uv run ouraring-mcp auth"
+                    "Запусти: uv run my-oura-mcp auth"
                 )
             if tokens.expired:
                 tokens = await self._refresh(tokens.refresh_token)
@@ -183,7 +183,7 @@ class OuraOAuth:
             hint = (
                 "refresh-токен отвергнут. Он одноразовый: так бывает, если тем же "
                 "токеном воспользовался другой экземпляр сервера. Держи один "
-                "живой инстанс и пройди авторизацию заново: uv run ouraring-mcp auth"
+                "живой инстанс и пройди авторизацию заново: uv run my-oura-mcp auth"
             )
         elif resp.status_code in (400, 401):
             hint = (

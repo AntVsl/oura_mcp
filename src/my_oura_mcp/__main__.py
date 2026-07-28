@@ -1,10 +1,10 @@
 """Точка входа.
 
-    ouraring-mcp                  # stdio, для Claude Code
-    ouraring-mcp --transport http # streamable-http, для удалённого доступа
-    ouraring-mcp auth                 # разовая авторизация в Oura
-    ouraring-mcp auth --status        # состояние токенов
-    ouraring-mcp auth --logout        # забыть токены
+    my-oura-mcp                  # stdio, для Claude Code
+    my-oura-mcp --transport http # streamable-http, для удалённого доступа
+    my-oura-mcp auth                 # разовая авторизация в Oura
+    my-oura-mcp auth --status        # состояние токенов
+    my-oura-mcp auth --logout        # забыть токены
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _auth(settings: Settings, argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="ouraring-mcp auth")
+    parser = argparse.ArgumentParser(prog="my-oura-mcp auth")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--status", action="store_true", help="показать состояние токенов")
     group.add_argument("--logout", action="store_true", help="удалить сохранённые токены")
@@ -70,7 +70,7 @@ def _auth(settings: Settings, argv: list[str]) -> int:
 
 
 def _serve(settings: Settings, argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="ouraring-mcp", description=__doc__)
+    parser = argparse.ArgumentParser(prog="my-oura-mcp", description=__doc__)
     parser.add_argument(
         "--transport",
         choices=("stdio", "http"),
@@ -98,7 +98,7 @@ def _serve(settings: Settings, argv: list[str]) -> int:
         if not settings.token_store.exists():
             print(
                 f"Внимание: режим production, но токенов в {settings.token_store} нет. "
-                "Запросы будут отклоняться, пока не пройдёшь `ouraring-mcp auth`.",
+                "Запросы будут отклоняться, пока не пройдёшь `my-oura-mcp auth`.",
                 file=sys.stderr,
             )
 
@@ -132,7 +132,7 @@ def _serve(settings: Settings, argv: list[str]) -> int:
 
 def _banner(settings: Settings, where: str) -> None:
     print(
-        f"ouraring-mcp: режим {settings.mode}, часовой пояс {settings.tz}, {where}",
+        f"my-oura-mcp: режим {settings.mode}, часовой пояс {settings.tz}, {where}",
         file=sys.stderr,
     )
 

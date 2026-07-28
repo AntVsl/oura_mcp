@@ -5,7 +5,7 @@ Oura отдаёт эндпоинт sleep по сессиям: ночь плюс 
 статистика за период молча получалась неверной.
 """
 
-from ouraring_mcp import shaping
+from my_oura_mcp import shaping
 
 
 def night(day, hours, hrv=40, **extra):

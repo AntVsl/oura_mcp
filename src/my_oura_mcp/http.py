@@ -47,7 +47,7 @@ class BearerAuthMiddleware:
                 send,
                 401,
                 b"unauthorized",
-                extra=[(b"www-authenticate", b'Bearer realm="ouraring-mcp"')],
+                extra=[(b"www-authenticate", b'Bearer realm="my-oura-mcp"')],
             )
             return
 

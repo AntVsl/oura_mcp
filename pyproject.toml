@@ -1,5 +1,5 @@
 [project]
-name = "ouraring-mcp"
+name = "my-oura-mcp"
 version = "0.1.0"
 description = "MCP server for Oura Ring data: sleep, readiness, HRV, resting heart rate"
 readme = "README.md"
@@ -42,14 +42,14 @@ Issues = "https://github.com/AntVsl/oura_mcp/issues"
 Changelog = "https://github.com/AntVsl/oura_mcp/blob/main/CHANGELOG.md"
 
 [project.scripts]
-ouraring-mcp = "ouraring_mcp.__main__:main"
+my-oura-mcp = "my_oura_mcp.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ouraring_mcp"]
+packages = ["src/my_oura_mcp"]
 
 [tool.uv]
 # cryptography>=49 не публикует колесо под x86_64 macOS и лезет собираться из

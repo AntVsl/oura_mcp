@@ -23,7 +23,7 @@ from .config import AUTHORIZE_URL, SCOPES, Settings
 WAIT_TIMEOUT_SEC = 300
 
 _PAGE = """<!doctype html><meta charset="utf-8">
-<title>ouraring-mcp</title>
+<title>my-oura-mcp</title>
 <body style="font-family:system-ui;padding:3rem;max-width:32rem">
 <h2>{title}</h2><p>{message}</p></body>"""
 

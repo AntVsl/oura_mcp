@@ -7,8 +7,8 @@ import httpx
 import pytest
 import respx
 
-from ouraring_mcp.auth import AuthError, OuraOAuth, Tokens, TokenStore
-from ouraring_mcp.config import TOKEN_URL, Settings
+from my_oura_mcp.auth import AuthError, OuraOAuth, Tokens, TokenStore
+from my_oura_mcp.config import TOKEN_URL, Settings
 
 
 def settings(tmp_path, mode="production") -> Settings:
@@ -144,7 +144,7 @@ async def test_rejected_refresh_names_the_cause(tmp_path):
 
 async def test_no_tokens_points_at_auth_command(tmp_path):
     cfg = settings(tmp_path)
-    with pytest.raises(AuthError, match="ouraring-mcp auth"):
+    with pytest.raises(AuthError, match="my-oura-mcp auth"):
         await OuraOAuth(cfg, TokenStore(cfg.token_store)).access_token()
 
 
