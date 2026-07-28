@@ -10,9 +10,27 @@
 
 from __future__ import annotations
 
+from datetime import datetime, tzinfo
 from typing import Any
 
 Row = dict[str, Any]
+
+
+def _local_day(timestamp: str, tz: tzinfo | None) -> str | None:
+    """Календарный день метки времени в заданном поясе.
+
+    Без tz возвращает дату как есть — это дата UTC, и для суточной группировки
+    она годится только если пояс сервера действительно UTC.
+    """
+    if tz is None:
+        return timestamp[:10] or None
+    try:
+        moment = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return timestamp[:10] or None
+    if moment.tzinfo is None:
+        return moment.date().isoformat()
+    return moment.astimezone(tz).date().isoformat()
 
 
 def _num(row: Row, *path: str) -> float | None:
@@ -287,10 +305,15 @@ def tags(rows: list[Row]) -> dict[str, Any]:
     return {"metric": "tags", "count": len(items), "items": items}
 
 
-def heartrate(rows: list[Row]) -> dict[str, Any]:
+def heartrate(rows: list[Row], tz: tzinfo | None = None) -> dict[str, Any]:
     """Поминутный пульс сворачивается посуточно.
 
     Сырой ряд — это тысячи точек за сутки; отдавать его целиком нельзя.
+
+    Группировка обязательно по местному поясу, а не по дате из строки UTC:
+    Oura отдаёт timestamp в UTC, и в поясе +03 сутки разрезаются надвое. Точки
+    с 00:00 до 03:00 по местному времени уезжали в предыдущий день — то есть
+    именно ночной пульс, ради которого этот инструмент и нужен.
     """
     by_day: dict[str, list[float]] = {}
     sources: dict[str, set[str]] = {}
@@ -299,7 +322,9 @@ def heartrate(rows: list[Row]) -> dict[str, Any]:
         bpm = _num(r, "bpm")
         if not ts or bpm is None:
             continue
-        day = ts[:10]
+        day = _local_day(ts, tz)
+        if day is None:
+            continue
         by_day.setdefault(day, []).append(bpm)
         if r.get("source"):
             sources.setdefault(day, set()).add(str(r["source"]))

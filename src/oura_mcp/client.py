@@ -22,13 +22,19 @@ from .dates import to_datetime_bounds
 # Эндпоинты, принимающие start_datetime/end_datetime вместо start_date/end_date.
 DATETIME_ENDPOINTS = frozenset({"heartrate"})
 
-# Эндпоинты, которые Oura фильтрует по bedtime_start в UTC, а не по полю day,
-# которое сама же возвращает. Для пояса +03 и отбоя после полуночи запись
-# «за сегодня» уезжает в предыдущие сутки UTC и в окно не попадает: запрос
-# 28..28 отдаёт пусто, хотя запись с day=28 существует и видна в 27..28.
+# Эндпоинты, которые Oura фильтрует по внутренней метке времени в UTC, а не по
+# полю day, которое сама же возвращает. В поясе +03 запись «за сегодня» уезжает
+# в предыдущие сутки UTC и в окно не попадает: запрос 28..28 отдаёт пусто, хотя
+# запись с day=28 существует и видна в 27..28.
+#
+# Проверено перебором на реальных данных: sleep и daily_activity теряют записи
+# в 8 случаях из 8, остальные эндпоинты (daily_sleep, daily_readiness,
+# daily_spo2, daily_stress, daily_resilience, daily_cardiovascular_age)
+# отвечают одинаково на узкое и расширенное окно.
+#
 # Лечим расширением окна с последующей фильтрацией по day на нашей стороне.
-BEDTIME_FILTERED = frozenset({"sleep"})
-BEDTIME_PAD_DAYS = 1
+UTC_WINDOW_FILTERED = frozenset({"sleep", "daily_activity"})
+UTC_WINDOW_PAD_DAYS = 1
 
 # Какой скоуп нужен эндпоинту — чтобы 403 объяснял себя сам.
 ENDPOINT_SCOPES = {
@@ -105,7 +111,7 @@ class OuraClient:
         extra_params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Все записи эндпоинта за диапазон, со всех страниц."""
-        pad = BEDTIME_PAD_DAYS if endpoint in BEDTIME_FILTERED else 0
+        pad = UTC_WINDOW_PAD_DAYS if endpoint in UTC_WINDOW_FILTERED else 0
 
         if endpoint in DATETIME_ENDPOINTS:
             lo, hi = to_datetime_bounds(start, end, self._settings.tz)

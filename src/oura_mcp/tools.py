@@ -156,7 +156,15 @@ def register(
         raw=True отдаёт весь ряд — это тысячи точек в сутки, бери узкий диапазон.
         """
         return await serve(
-            "heartrate", days_back, start_date, end_date, raw, default_days=3
+            "heartrate",
+            days_back,
+            start_date,
+            end_date,
+            raw,
+            # Пояс обязателен: Oura отдаёт timestamp в UTC, и без него ночные
+            # точки попадают в предыдущие сутки.
+            shaper=lambda rows: shaping.heartrate(rows, settings.tz),
+            default_days=3,
         )
 
     @mcp.tool()
