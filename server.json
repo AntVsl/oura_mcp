@@ -55,7 +55,7 @@
     {
       "registryType": "oci",
       "registryBaseUrl": "https://docker.io",
-      "identifier": "antvsl/oura-mcp",
+      "identifier": "iican/oura-mcp",
       "version": "0.1.0",
       "transport": {
         "type": "streamable-http",

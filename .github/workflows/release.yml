@@ -43,6 +43,13 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     environment: release
+    env:
+      # Имя пользователя и образа секретом не является — оно публично объявлено
+      # в server.json. Держать его в secrets вредно: GitHub маскирует секреты в
+      # логах, и теги сборки читались бы как ***/oura-mcp.
+      DOCKERHUB_USERNAME: iican
+      IMAGE: iican/oura-mcp
+
     steps:
       - uses: actions/checkout@v5
 
@@ -52,14 +59,14 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Derive tags
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/oura-mcp
+          images: ${{ env.IMAGE }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
