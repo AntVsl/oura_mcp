@@ -39,6 +39,17 @@ Then point a client at `http://your-host:8000/mcp` with the header
 Liveness check: `curl http://your-host:8000/healthz` — needs no token and
 returns no data.
 
+### Not using containers?
+
+For a local setup with Claude Code, the PyPI package is simpler — no image, no
+exposed port, no shared secret to manage:
+
+```bash
+uvx my-oura-mcp
+```
+
+https://pypi.org/project/my-oura-mcp/
+
 ## Environment
 
 | Variable | Purpose |
