@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from oura_mcp.dates import DateRangeError, resolve_range, to_datetime_bounds
+from ouraring_mcp.dates import DateRangeError, resolve_range, to_datetime_bounds
 
 MSK = ZoneInfo("Europe/Moscow")
 

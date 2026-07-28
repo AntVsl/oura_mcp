@@ -7,7 +7,7 @@ Oura отдаёт timestamp в UTC. Группировка по первым 10 
 
 from zoneinfo import ZoneInfo
 
-from oura_mcp import shaping
+from ouraring_mcp import shaping
 
 MSK = ZoneInfo("Europe/Moscow")  # +03
 LA = ZoneInfo("America/Los_Angeles")  # -07/-08

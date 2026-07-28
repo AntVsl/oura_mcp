@@ -1,4 +1,4 @@
-# oura-mcp
+# ouraring-mcp
 
 [![CI](https://github.com/AntVsl/oura_mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/AntVsl/oura_mcp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -40,13 +40,13 @@ uv sync
 Check that data flows (hits Oura's sandbox, no auth required):
 
 ```bash
-uv run python -m oura_mcp.smoke
+uv run python -m ouraring_mcp.smoke
 ```
 
 Connect it to Claude Code:
 
 ```bash
-claude mcp add --scope user oura -- uv --directory /path/to/oura_mcp run oura-mcp
+claude mcp add --scope user oura -- uv --directory /path/to/oura_mcp run ouraring-mcp
 ```
 
 Then ask Claude for your Oura summary. The `get_status` tool reports which
@@ -92,7 +92,7 @@ No review needed: a fresh application works immediately, capped at 10 users.
 **3. Authorize once:**
 
 ```bash
-uv run oura-mcp auth
+uv run ouraring-mcp auth
 ```
 
 This starts a local server on your `OURA_REDIRECT_URI`, opens a browser, and
@@ -104,8 +104,8 @@ them on its own from there.
 Housekeeping:
 
 ```bash
-uv run oura-mcp auth --status   # authorized? how long is the token good for?
-uv run oura-mcp auth --logout   # forget stored tokens
+uv run ouraring-mcp auth --status   # authorized? how long is the token good for?
+uv run ouraring-mcp auth --logout   # forget stored tokens
 ```
 
 > Personal Access Tokens no longer work: Oura stopped issuing them in
@@ -114,7 +114,7 @@ uv run oura-mcp auth --logout   # forget stored tokens
 > **Refresh tokens are single-use.** Each refresh mints a new one and kills the
 > old, so two servers sharing a token store will knock each other out. The
 > symptom is a `400` mentioning single use; the cure is re-running
-> `oura-mcp auth` and keeping exactly one live instance.
+> `ouraring-mcp auth` and keeping exactly one live instance.
 
 ## Configuration
 
@@ -137,7 +137,7 @@ The same code serves both cases — only the transport differs.
 ### Locally, in Claude Code
 
 ```bash
-claude mcp add --scope user oura -- uv --directory /path/to/oura_mcp run oura-mcp
+claude mcp add --scope user oura -- uv --directory /path/to/oura_mcp run ouraring-mcp
 ```
 
 `--scope user` makes the server visible from any directory; without it, only
@@ -146,7 +146,7 @@ from where you ran the command. Verify with `claude mcp list`.
 ### Locally over HTTP, for debugging
 
 ```bash
-uv run oura-mcp --transport http --port 8000
+uv run ouraring-mcp --transport http --port 8000
 ```
 
 No secret required on loopback.
@@ -236,7 +236,7 @@ API yourself:
   no per-user separation.
 - **The server refuses to start on a non-loopback address without a secret**
   rather than quietly serving health data to the open internet. Try it:
-  `uv run oura-mcp --transport http --host 0.0.0.0`.
+  `uv run ouraring-mcp --transport http --host 0.0.0.0`.
 - `/healthz` is intentionally open — a reverse proxy needs it, and it returns
   nothing but `ok`.
 - Caddy strips the `Authorization` header from its logs.

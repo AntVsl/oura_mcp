@@ -1,6 +1,6 @@
 import pytest
 
-from oura_mcp.http import HEALTH_PATH, BearerAuthMiddleware, EndpointAuthError, resolve_token
+from ouraring_mcp.http import HEALTH_PATH, BearerAuthMiddleware, EndpointAuthError, resolve_token
 
 TOKEN = "s" * 32
 

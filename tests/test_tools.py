@@ -12,8 +12,8 @@ import httpx
 import pytest
 import respx
 
-from oura_mcp.config import SANDBOX_BASE, Settings
-from oura_mcp.server import build
+from ouraring_mcp.config import SANDBOX_BASE, Settings
+from ouraring_mcp.server import build
 
 MSK = ZoneInfo("Europe/Moscow")
 

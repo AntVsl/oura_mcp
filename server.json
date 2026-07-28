@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
-      "identifier": "oura-mcp",
+      "identifier": "ouraring-mcp",
       "version": "0.1.0",
       "runtimeHint": "uvx",
       "transport": { "type": "stdio" },

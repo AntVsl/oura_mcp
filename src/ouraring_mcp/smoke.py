@@ -1,6 +1,6 @@
 """Проверка сквозного пути: конфиг → HTTP → пагинация → сжатие.
 
-Запуск: `uv run python -m oura_mcp.smoke`
+Запуск: `uv run python -m ouraring_mcp.smoke`
 В режиме sandbox работает без авторизации.
 """
 
