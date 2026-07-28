@@ -1,0 +1,29 @@
+name: Docker Hub description
+
+# Отдельный workflow, а не шаг релиза: описание на Docker Hub — это поле
+# репозитория, а не часть образа, и править его хочется без выпуска новой
+# версии. Через release.yml это было бы невозможно — там публикация в PyPI,
+# которая на уже занятой версии упадёт.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/dockerhub.md
+      - .github/workflows/dockerhub-description.yml
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Push README to Docker Hub
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: iican
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: iican/oura-mcp
+          short-description: "MCP server for Oura Ring data: sleep, readiness, HRV, resting heart rate"
+          readme-filepath: docs/dockerhub.md

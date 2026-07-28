@@ -71,6 +71,14 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
+          # Метки задаются явно. По умолчанию они берутся из метаданных
+          # репозитория GitHub, а там описания нет — в 0.1.0 уехал образ с
+          # пустым org.opencontainers.image.description и title=oura_mcp.
+          labels: |
+            org.opencontainers.image.title=my-oura-mcp
+            org.opencontainers.image.description=MCP server for Oura Ring data: sleep, readiness, HRV, resting heart rate
+            org.opencontainers.image.documentation=https://github.com/AntVsl/oura_mcp#readme
+            org.opencontainers.image.licenses=MIT
 
       - name: Build and push
         uses: docker/build-push-action@v6
