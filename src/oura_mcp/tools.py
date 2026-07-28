@@ -6,6 +6,13 @@ get_daily_summary, собирающий три эндпоинта в один о
 
 У каждого инструмента есть raw: по умолчанию возвращается сжатая сводка,
 raw=True отдаёт нетронутый ответ Oura.
+
+days_back объявлен как int | None = None, а не int = 7: некоторые MCP-клиенты
+подставляют объявленное значение по умолчанию как явный параметр вызова, и
+тогда days_back=7 приходит вместе с осознанно переданными start_date/end_date,
+что resolve_range() расценивает как конфликт. None отличим от «не передано»
+только если и в сигнатуре стоит None; сам дефолт (7, 3 или 30 в зависимости
+от инструмента) применяется уже внутри fetch/serve.
 """
 
 from __future__ import annotations
@@ -20,6 +27,7 @@ from .client import TokenProvider, OuraClient, OuraError, TIMEOUT
 from .config import Settings
 from .dates import DateRangeError, resolve_range
 
+
 def register(
     mcp: FastMCP, settings: Settings, token_provider: TokenProvider | None = None
 ) -> None:
@@ -30,10 +38,13 @@ def register(
         days_back: int | None,
         start_date: str | None,
         end_date: str | None,
+        default_days: int,
     ) -> list[dict[str, Any]]:
         nonlocal http
         if http is None:
             http = httpx.AsyncClient(timeout=TIMEOUT)
+        if days_back is None and start_date is None and end_date is None:
+            days_back = default_days
         start, end = resolve_range(settings.tz, days_back, start_date, end_date)
         client = OuraClient(settings, token_provider, http=http)
         return await client.fetch(endpoint, start, end)
@@ -45,10 +56,11 @@ def register(
         end_date: str | None,
         raw: bool,
         shaper: Any = None,
+        default_days: int = 7,
     ) -> dict[str, Any]:
         """Общий путь: достать, при необходимости сжать, ошибки — текстом."""
         try:
-            rows = await fetch(endpoint, days_back, start_date, end_date)
+            rows = await fetch(endpoint, days_back, start_date, end_date, default_days)
         except (OuraError, DateRangeError) as exc:
             return {"error": str(exc)}
 
@@ -61,15 +73,15 @@ def register(
 
     @mcp.tool()
     async def get_daily_summary(
-        days_back: int = 7,
+        days_back: int | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
         raw: bool = False,
     ) -> dict[str, Any]:
         """Общая картина по дням: оценки сна, готовности и активности сразу.
 
-        Самый частый запрос — начинай с него, а за деталями иди в get_sleep
-        и остальные инструменты.
+        По умолчанию — последние 7 дней. Самый частый запрос — начинай с него,
+        а за деталями иди в get_sleep и остальные инструменты.
         """
         out: dict[str, Any] = {}
         for name, endpoint in (
@@ -84,90 +96,100 @@ def register(
 
     @mcp.tool()
     async def get_sleep(
-        days_back: int = 7,
+        days_back: int | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
         raw: bool = False,
     ) -> dict[str, Any]:
         """Детальный сон: стадии, эффективность, HRV, пульс покоя, дыхание,
-        отклонение температуры тела. Здесь же лежат ночные HRV и lowest_hr."""
+        отклонение температуры тела. Здесь же лежат ночные HRV и lowest_hr.
+        По умолчанию — последние 7 дней."""
         return await serve("sleep", days_back, start_date, end_date, raw)
 
     @mcp.tool()
     async def get_sleep_score(
-        days_back: int = 7,
+        days_back: int | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
         raw: bool = False,
     ) -> dict[str, Any]:
-        """Только дневная оценка сна и её вклады. Легче, чем get_sleep."""
+        """Только дневная оценка сна и её вклады. Легче, чем get_sleep.
+        По умолчанию — последние 7 дней."""
         return await serve("daily_sleep", days_back, start_date, end_date, raw)
 
     # --- готовность и активность ---------------------------------------------
 
     @mcp.tool()
     async def get_readiness(
-        days_back: int = 7,
+        days_back: int | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
         raw: bool = False,
     ) -> dict[str, Any]:
-        """Готовность (readiness): оценка, баланс HRV, отклонение температуры."""
+        """Готовность (readiness): оценка, баланс HRV, отклонение температуры.
+        По умолчанию — последние 7 дней."""
         return await serve("daily_readiness", days_back, start_date, end_date, raw)
 
     @mcp.tool()
     async def get_activity(
-        days_back: int = 7,
+        days_back: int | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
         raw: bool = False,
     ) -> dict[str, Any]:
-        """Активность: оценка, шаги, активные и общие калории."""
+        """Активность: оценка, шаги, активные и общие калории.
+        По умолчанию — последние 7 дней."""
         return await serve("daily_activity", days_back, start_date, end_date, raw)
 
     # --- сердце и дыхание -----------------------------------------------------
 
     @mcp.tool()
     async def get_heartrate(
-        days_back: int = 3,
+        days_back: int | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
         raw: bool = False,
     ) -> dict[str, Any]:
         """Поминутный пульс, свёрнутый посуточно (среднее, минимум, максимум).
+        По умолчанию — последние 3 дня.
 
         raw=True отдаёт весь ряд — это тысячи точек в сутки, бери узкий диапазон.
         """
-        return await serve("heartrate", days_back, start_date, end_date, raw)
+        return await serve(
+            "heartrate", days_back, start_date, end_date, raw, default_days=3
+        )
 
     @mcp.tool()
     async def get_spo2(
-        days_back: int = 7,
+        days_back: int | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
         raw: bool = False,
     ) -> dict[str, Any]:
-        """Насыщение крови кислородом во сне и индекс нарушений дыхания."""
+        """Насыщение крови кислородом во сне и индекс нарушений дыхания.
+        По умолчанию — последние 7 дней."""
         return await serve("daily_spo2", days_back, start_date, end_date, raw)
 
     @mcp.tool()
     async def get_stress(
-        days_back: int = 7,
+        days_back: int | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
         raw: bool = False,
     ) -> dict[str, Any]:
-        """Дневной стресс: время под нагрузкой и в восстановлении, оценка дня."""
+        """Дневной стресс: время под нагрузкой и в восстановлении, оценка дня.
+        По умолчанию — последние 7 дней."""
         return await serve("daily_stress", days_back, start_date, end_date, raw)
 
     @mcp.tool()
     async def get_heart_health(
-        days_back: int = 30,
+        days_back: int | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
         raw: bool = False,
     ) -> dict[str, Any]:
-        """Сосудистый возраст и VO2max. Обновляются редко — бери период пошире."""
+        """Сосудистый возраст и VO2max. Обновляются редко, поэтому по умолчанию
+        отдаются последние 30 дней."""
         out: dict[str, Any] = {}
         for name, endpoint in (
             ("cardiovascular_age", "daily_cardiovascular_age"),
@@ -180,6 +202,7 @@ def register(
                 end_date,
                 raw,
                 shaper=lambda rows, m=name: shaping.heart_health(rows, m),
+                default_days=30,
             )
         return out
 
@@ -187,13 +210,16 @@ def register(
 
     @mcp.tool()
     async def get_tags(
-        days_back: int = 30,
+        days_back: int | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
         raw: bool = False,
     ) -> dict[str, Any]:
-        """Отметки, проставленные вручную в приложении Oura."""
-        return await serve("enhanced_tag", days_back, start_date, end_date, raw)
+        """Отметки, проставленные вручную в приложении Oura.
+        По умолчанию — последние 30 дней."""
+        return await serve(
+            "enhanced_tag", days_back, start_date, end_date, raw, default_days=30
+        )
 
     # --- служебное -------------------------------------------------------------
 

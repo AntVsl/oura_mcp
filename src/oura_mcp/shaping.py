@@ -135,8 +135,45 @@ def daily_activity(rows: list[Row]) -> dict[str, Any]:
     )
 
 
+# Приоритет типов сна: основную ночь Oura помечает long_sleep, дрёму — *_nap.
+MAIN_SLEEP_TYPE = "long_sleep"
+
+
+def _pick_main_sleep(rows: list[Row]) -> tuple[list[Row], dict[str, list[Row]]]:
+    """Разделяет записи на основные ночи и дрёму.
+
+    За сутки Oura отдаёт несколько записей — ночь плюс дневной сон. Раньше
+    здесь бралась произвольная из них, и дрёма на 12 минут могла вытеснить
+    полноценную ночь: статистика за период получалась неверной.
+
+    Основной считается запись типа long_sleep, а если её нет — самая длинная.
+    """
+    by_day: dict[str, list[Row]] = {}
+    for r in rows:
+        if r.get("day"):
+            by_day.setdefault(r["day"], []).append(r)
+
+    main: list[Row] = []
+    extras: dict[str, list[Row]] = {}
+    for day, group in sorted(by_day.items()):
+        long_sleeps = [r for r in group if r.get("type") == MAIN_SLEEP_TYPE]
+        pool = long_sleeps or group
+        best = max(pool, key=lambda r: _num(r, "total_sleep_duration") or 0)
+        main.append(best)
+        rest = [r for r in group if r is not best]
+        if rest:
+            extras[day] = rest
+    return main, extras
+
+
 def sleep_detail(rows: list[Row]) -> dict[str, Any]:
-    """Детальный сон: стадии, HRV, пульс, дыхание, температура."""
+    """Детальный сон: стадии, HRV, пульс, дыхание, температура.
+
+    Одна запись на сутки — основная ночь. Дневной сон учитывается отдельным
+    полем naps_h, чтобы не смешивать его показатели с ночными: усреднять HRV
+    ночи и двадцатиминутной дрёмы бессмысленно.
+    """
+    rows, extras = _pick_main_sleep(rows)
     daily = [
         _compact(
             {
@@ -158,6 +195,7 @@ def sleep_detail(rows: list[Row]) -> dict[str, Any]:
                 "avg_breath": _num(r, "average_breath"),
                 "temp_deviation_c": _num(r, "readiness", "temperature_deviation"),
                 "bedtime_start": r.get("bedtime_start"),
+                "naps_h": _naps_hours(extras.get(r.get("day", ""), [])),
             }
         )
         for r in rows
@@ -167,6 +205,12 @@ def sleep_detail(rows: list[Row]) -> dict[str, Any]:
     return _envelope(
         "sleep_detail", daily, {k: [d.get(k) for d in daily] for k in keys}
     )
+
+
+def _naps_hours(rows: list[Row]) -> float | None:
+    """Суммарная дрёма за сутки, помимо основной ночи."""
+    total = sum(_num(r, "total_sleep_duration") or 0 for r in rows)
+    return round(total / 3600, 2) if total else None
 
 
 def daily_spo2(rows: list[Row]) -> dict[str, Any]:

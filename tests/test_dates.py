@@ -23,9 +23,18 @@ def test_explicit_range_is_respected():
     assert (start, end) == (date(2026, 1, 1), date(2026, 1, 10))
 
 
-def test_days_back_and_explicit_range_conflict():
-    with pytest.raises(DateRangeError, match="либо days_back"):
-        resolve_range(MSK, days_back=7, start_date="2026-01-01")
+def test_explicit_dates_win_over_days_back():
+    """MCP-клиенты досылают объявленный default days_back вместе с датами.
+    Ошибка здесь ломала любой запрос с диапазоном, поэтому даты приоритетнее."""
+    start, end = resolve_range(
+        MSK, days_back=7, start_date="2026-01-01", end_date="2026-01-10"
+    )
+    assert (start, end) == (date(2026, 1, 1), date(2026, 1, 10))
+
+
+def test_days_back_ignored_when_only_start_date_given():
+    start, _ = resolve_range(MSK, days_back=90, start_date="2026-01-01")
+    assert start == date(2026, 1, 1)
 
 
 def test_reversed_range_rejected():

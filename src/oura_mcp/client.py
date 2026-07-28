@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import random
 from collections.abc import Awaitable, Callable
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import httpx
@@ -21,6 +21,14 @@ from .dates import to_datetime_bounds
 
 # Эндпоинты, принимающие start_datetime/end_datetime вместо start_date/end_date.
 DATETIME_ENDPOINTS = frozenset({"heartrate"})
+
+# Эндпоинты, которые Oura фильтрует по bedtime_start в UTC, а не по полю day,
+# которое сама же возвращает. Для пояса +03 и отбоя после полуночи запись
+# «за сегодня» уезжает в предыдущие сутки UTC и в окно не попадает: запрос
+# 28..28 отдаёт пусто, хотя запись с day=28 существует и видна в 27..28.
+# Лечим расширением окна с последующей фильтрацией по day на нашей стороне.
+BEDTIME_FILTERED = frozenset({"sleep"})
+BEDTIME_PAD_DAYS = 1
 
 # Какой скоуп нужен эндпоинту — чтобы 403 объяснял себя сам.
 ENDPOINT_SCOPES = {
@@ -48,6 +56,12 @@ TokenProvider = Callable[[], Awaitable[str]]
 
 class OuraError(RuntimeError):
     """Ошибка обращения к Oura, пригодная для показа человеку и модели."""
+
+
+def _trim_to_days(rows: list[dict[str, Any]], start: date, end: date) -> list[dict[str, Any]]:
+    """Отбрасывает записи, попавшие только из-за расширения окна."""
+    lo, hi = start.isoformat(), end.isoformat()
+    return [r for r in rows if r.get("day") and lo <= r["day"] <= hi]
 
 
 class OuraClient:
@@ -91,11 +105,16 @@ class OuraClient:
         extra_params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Все записи эндпоинта за диапазон, со всех страниц."""
+        pad = BEDTIME_PAD_DAYS if endpoint in BEDTIME_FILTERED else 0
+
         if endpoint in DATETIME_ENDPOINTS:
             lo, hi = to_datetime_bounds(start, end, self._settings.tz)
             params: dict[str, Any] = {"start_datetime": lo, "end_datetime": hi}
         else:
-            params = {"start_date": start.isoformat(), "end_date": end.isoformat()}
+            params = {
+                "start_date": (start - timedelta(days=pad)).isoformat(),
+                "end_date": (end + timedelta(days=pad)).isoformat(),
+            }
         if extra_params:
             params.update(extra_params)
 
@@ -108,7 +127,7 @@ class OuraClient:
             rows.extend(payload.get("data") or [])
             nxt = payload.get("next_token")
             if not nxt or nxt in seen_tokens:
-                return rows
+                return _trim_to_days(rows, start, end) if pad else rows
             seen_tokens.add(nxt)
             params = {**params, "next_token": nxt}
 

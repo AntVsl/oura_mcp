@@ -29,12 +29,14 @@ def resolve_range(
     """Возвращает (start, end) включительно.
 
     Либо days_back (N последних дней, считая сегодня), либо явная пара дат.
+
+    Если пришло и то и другое — выигрывают даты, а days_back молча игнорируется.
+    Раньше здесь была ошибка «укажи что-то одно», но она оказалась вредной:
+    MCP-клиенты подставляют объявленный по умолчанию days_back как явный
+    аргумент, из-за чего любой запрос с датами падал. Намерение при явных датах
+    однозначно, спорить с ним не за что.
     """
     if start_date or end_date:
-        if days_back is not None:
-            raise DateRangeError(
-                "Укажи либо days_back, либо пару start_date/end_date, но не оба сразу"
-            )
         end = _parse(end_date, "end_date") if end_date else today(tz)
         start = _parse(start_date, "start_date") if start_date else end - timedelta(days=6)
     else:

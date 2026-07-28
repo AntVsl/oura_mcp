@@ -99,6 +99,54 @@ async def test_401_suggests_reauth():
 
 
 @respx.mock
+async def test_sleep_window_is_padded_for_bedtime_filtering():
+    """Oura фильтрует sleep по bedtime_start в UTC, а не по полю day. При отбое
+    после полуночи в поясе +03 запрос 28..28 отдаёт пусто, хотя запись с day=28
+    есть. Поэтому окно расширяется на сутки."""
+    route = respx.get(f"{SANDBOX_BASE}/sleep").mock(
+        return_value=httpx.Response(200, json={"data": []})
+    )
+    async with OuraClient(settings()) as client:
+        await client.fetch("sleep", date(2026, 7, 28), date(2026, 7, 28))
+    params = route.calls[0].request.url.params
+    assert params["start_date"] == "2026-07-27"
+    assert params["end_date"] == "2026-07-29"
+
+
+@respx.mock
+async def test_sleep_trims_rows_pulled_in_by_padding():
+    """Расширенное окно тянет лишние дни — наружу они уходить не должны."""
+    respx.get(f"{SANDBOX_BASE}/sleep").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"day": "2026-07-27"},
+                    {"day": "2026-07-28"},
+                    {"day": "2026-07-29"},
+                ]
+            },
+        )
+    )
+    async with OuraClient(settings()) as client:
+        rows = await client.fetch("sleep", date(2026, 7, 28), date(2026, 7, 28))
+    assert [r["day"] for r in rows] == ["2026-07-28"]
+
+
+@respx.mock
+async def test_daily_endpoints_are_not_padded():
+    """Расширение нужно только sleep — daily_* фильтруют по day корректно."""
+    route = respx.get(f"{SANDBOX_BASE}/daily_readiness").mock(
+        return_value=httpx.Response(200, json={"data": []})
+    )
+    async with OuraClient(settings()) as client:
+        await client.fetch("daily_readiness", date(2026, 7, 28), date(2026, 7, 28))
+    params = route.calls[0].request.url.params
+    assert params["start_date"] == "2026-07-28"
+    assert params["end_date"] == "2026-07-28"
+
+
+@respx.mock
 async def test_heartrate_uses_datetime_params():
     route = respx.get(f"{SANDBOX_BASE}/heartrate").mock(
         return_value=httpx.Response(200, json={"data": []})
