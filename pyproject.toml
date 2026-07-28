@@ -1,20 +1,45 @@
 [project]
 name = "oura-mcp"
 version = "0.1.0"
-description = "MCP-сервер для доступа к данным Oura Ring"
+description = "MCP server for Oura Ring data: sleep, readiness, HRV, resting heart rate"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Anton Vasilev" }]
+keywords = ["mcp", "oura", "health", "sleep", "hrv", "claude", "wearable"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+    "Typing :: Typed",
+]
+
 dependencies = [
-    "mcp>=1.28",
+    # Верхняя граница обязательна: в mcp 2.x точка входа переименована
+    # (FastMCP -> MCPServer), и наш импорт на ней не соберётся.
+    "mcp>=1.28,<2",
     "httpx>=0.27",
     "python-dotenv>=1.0",
     "uvicorn>=0.30",
     "starlette>=0.37",
+    # cryptography приезжает транзитивно через mcp -> pyjwt[crypto]. С версии 49
+    # под x86_64 macOS колёс нет, и установка уходит собирать Rust, упираясь в
+    # OpenSSL. Ограничение стоит здесь, а не в [tool.uv]: то действует только
+    # внутри репозитория и не защищает тех, кто ставит пакет из PyPI.
+    "cryptography<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "respx>=0.21"]
+
+[project.urls]
+Homepage = "https://github.com/AntVsl/oura_mcp"
+Repository = "https://github.com/AntVsl/oura_mcp"
+Issues = "https://github.com/AntVsl/oura_mcp/issues"
+Changelog = "https://github.com/AntVsl/oura_mcp/blob/main/CHANGELOG.md"
 
 [project.scripts]
 oura-mcp = "oura_mcp.__main__:main"

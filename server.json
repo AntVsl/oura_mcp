@@ -1,0 +1,91 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.AntVsl/oura-mcp",
+  "title": "Oura Ring",
+  "description": "Sleep, readiness, activity, HRV, resting heart rate, SpO2 and stress from an Oura Ring. Returns compact summaries by default with raw API responses on request.",
+  "version": "0.1.0",
+  "websiteUrl": "https://github.com/AntVsl/oura_mcp#readme",
+  "repository": {
+    "url": "https://github.com/AntVsl/oura_mcp",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "oura-mcp",
+      "version": "0.1.0",
+      "runtimeHint": "uvx",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "OURA_CLIENT_ID",
+          "description": "Client ID of your Oura application from developer.ouraring.com",
+          "isRequired": true,
+          "isSecret": false
+        },
+        {
+          "name": "OURA_CLIENT_SECRET",
+          "description": "Client secret of your Oura application",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "OURA_REDIRECT_URI",
+          "description": "OAuth redirect URI; must match the Oura application byte for byte",
+          "default": "http://localhost:8765/callback"
+        },
+        {
+          "name": "OURA_API_MODE",
+          "description": "sandbox for Oura's synthetic data (no auth needed), production for your own",
+          "default": "sandbox"
+        },
+        {
+          "name": "OURA_TZ",
+          "description": "IANA timezone deciding what counts as today. Set it explicitly on servers, whose clocks run in UTC",
+          "default": "UTC"
+        },
+        {
+          "name": "OURA_TOKEN_STORE",
+          "description": "Where the OAuth flow stores tokens. Written by the server, not set by hand",
+          "default": ".oura/tokens.json"
+        }
+      ]
+    },
+    {
+      "registryType": "oci",
+      "registryBaseUrl": "https://docker.io",
+      "identifier": "antvsl/oura-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://localhost:8000/mcp"
+      },
+      "environmentVariables": [
+        {
+          "name": "OURA_MCP_TOKEN",
+          "description": "Shared secret guarding the HTTP endpoint. Required whenever the server binds to anything other than loopback; without it the server refuses to start",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "OURA_CLIENT_ID",
+          "description": "Client ID of your Oura application from developer.ouraring.com",
+          "isRequired": true,
+          "isSecret": false
+        },
+        {
+          "name": "OURA_CLIENT_SECRET",
+          "description": "Client secret of your Oura application",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "OURA_TZ",
+          "description": "IANA timezone deciding what counts as today. Container clocks run in UTC, so set this",
+          "default": "UTC"
+        }
+      ]
+    }
+  ]
+}

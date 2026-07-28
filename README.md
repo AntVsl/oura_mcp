@@ -1,25 +1,35 @@
 # oura-mcp
 
-MCP-сервер для доступа к данным Oura Ring из Claude Code и claude.ai.
+[![CI](https://github.com/AntVsl/oura_mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/AntVsl/oura_mcp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 
-Спрашиваешь «как я спал на прошлой неделе» — Claude сам вызывает нужный
-инструмент и получает готовую сводку, а не гору JSON.
+An MCP server that gives Claude access to your Oura Ring data.
 
-## Особенности
+Ask "how did I sleep last week" and Claude calls the right tool and gets a
+summary back — not a wall of JSON.
 
-- **Один код — два транспорта.** `stdio` для Claude Code локально,
-  `streamable-http` для развёртывания на сервере. Различаются одним флагом.
-- **Сжатые ответы.** По умолчанию возвращается сводка (посуточные значения +
-  статистика с трендом), а не сырой ответ API. Полный JSON доступен через
-  `raw=True` у любого инструмента.
-- **Песочница из коробки.** Работает на тестовых данных Oura без всякой
-  авторизации — можно поднять и попробовать за минуту.
-- **Устойчивость к сети.** Обход пагинации `next_token`, ретраи с
-  экспоненциальным бэкоффом, внятные сообщения вместо голых кодов ответа.
+*Читать по-русски: [README.ru.md](README.ru.md)*
 
-## Быстрый старт
+## Why another one
 
-Нужен [uv](https://docs.astral.sh/uv/). Токен Oura на этом шаге не нужен.
+- **Compact by default.** Tools return per-day values plus statistics with a
+  trend, not the raw API payload. Raw responses stay one `raw=True` away.
+  A month of heart-rate data shrinks by more than 10×.
+- **One codebase, two transports.** `stdio` for local use, `streamable-http`
+  for remote. A flag apart, not a rewrite.
+- **Timezone-correct.** Oura filters some endpoints by an internal UTC
+  timestamp while returning a local `day` field, and returns heart-rate
+  timestamps in UTC. Both quietly lose or misplace data outside UTC. This
+  server handles it — see [Timezone handling](#timezone-handling).
+- **Survives flaky networks.** Follows `next_token` pagination, retries
+  dropped connections with exponential backoff, and turns HTTP status codes
+  into messages that say what to fix.
+- **Try before authorizing.** Oura's sandbox works with no credentials at all.
+
+## Quick start
+
+Requires [uv](https://docs.astral.sh/uv/). No Oura token needed for this part.
 
 ```bash
 git clone https://github.com/AntVsl/oura_mcp && cd oura_mcp
@@ -27,227 +37,234 @@ cp .env.example .env
 uv sync
 ```
 
-Проверка, что данные доходят (идёт в песочницу Oura, авторизация не нужна):
+Check that data flows (hits Oura's sandbox, no auth required):
 
 ```bash
 uv run python -m oura_mcp.smoke
 ```
 
-Подключение к Claude Code:
+Connect it to Claude Code:
 
 ```bash
-claude mcp add oura -- uv --directory /полный/путь/к/oura_mcp run oura-mcp
+claude mcp add --scope user oura -- uv --directory /path/to/oura_mcp run oura-mcp
 ```
 
-Затем в сессии: *«покажи сводку Oura за неделю»*. Инструмент `get_status`
-подтвердит, в каком режиме сервер работает.
+Then ask Claude for your Oura summary. The `get_status` tool reports which
+mode the server is in.
 
-## Инструменты
+## Tools
 
-| Инструмент | Что отдаёт | По умолчанию |
+| Tool | Returns | Default range |
 |---|---|---|
-| `get_daily_summary` | Оценки сна, готовности и активности сразу | 7 дней |
-| `get_sleep` | Стадии сна, эффективность, HRV, пульс покоя, дыхание, температура | 7 дней |
-| `get_sleep_score` | Только дневная оценка сна — легче, чем `get_sleep` | 7 дней |
-| `get_readiness` | Готовность, баланс HRV, отклонение температуры | 7 дней |
-| `get_activity` | Оценка активности, шаги, калории | 7 дней |
-| `get_heartrate` | Поминутный пульс, свёрнутый посуточно | 3 дня |
-| `get_spo2` | SpO₂ во сне, индекс нарушений дыхания | 7 дней |
-| `get_stress` | Время под нагрузкой и в восстановлении | 7 дней |
-| `get_heart_health` | Сосудистый возраст, VO₂max | 30 дней |
-| `get_tags` | Отметки, проставленные вручную в приложении | 30 дней |
-| `get_status` | Режим работы и состояние авторизации | — |
+| `get_daily_summary` | Sleep, readiness and activity scores at once | 7 days |
+| `get_sleep` | Sleep stages, efficiency, HRV, resting HR, breathing, temperature | 7 days |
+| `get_sleep_score` | Daily sleep score only — lighter than `get_sleep` | 7 days |
+| `get_readiness` | Readiness score, HRV balance, temperature deviation | 7 days |
+| `get_activity` | Activity score, steps, calories | 7 days |
+| `get_heartrate` | Per-minute heart rate collapsed to daily stats | 3 days |
+| `get_spo2` | Blood oxygen during sleep, breathing disturbance index | 7 days |
+| `get_stress` | Time under load and in recovery | 7 days |
+| `get_heart_health` | Cardiovascular age, VO₂max | 30 days |
+| `get_tags` | Tags you entered in the Oura app | 30 days |
+| `get_status` | Server mode and authorization state | — |
 
-Общие параметры: `days_back` **либо** пара `start_date`/`end_date`
-(`YYYY-MM-DD`), плюс `raw` для получения нетронутого ответа Oura.
+Every data tool takes either `days_back` or an explicit `start_date`/`end_date`
+pair (`YYYY-MM-DD`), plus `raw` to get Oura's untouched response.
 
-## Переход на реальные данные
+## Using your own data
 
-Песочница отдаёт синтетику. Чтобы получить свои данные, нужно приложение Oura
-и разовая авторизация.
+The sandbox returns synthetic data. For your own you need an Oura application
+and a one-time authorization.
 
-**1. Зарегистрируй приложение** на
+**1. Register an application** at
 [developer.ouraring.com/applications](https://developer.ouraring.com/applications):
 
-| Поле | Значение |
+| Field | Value |
 |---|---|
-| Redirect URI | `http://localhost:8765/callback` — сверяется посимвольно |
+| Redirect URI | `http://localhost:8765/callback` — matched byte for byte |
 | Scopes | `daily`, `heartrate`, `tag`, `spo2`, `stress`, `heart_health` |
-| Остальные поля | произвольные; для персонального приложения не проверяются |
+| Everything else | Arbitrary; not enforced for personal applications |
 
-Проходить ревью не нужно: свежее приложение работает сразу, лимит — 10
-пользователей.
+No review needed: a fresh application works immediately, capped at 10 users.
 
-**2. Впиши `OURA_CLIENT_ID` и `OURA_CLIENT_SECRET` в `.env`.**
+**2. Put `OURA_CLIENT_ID` and `OURA_CLIENT_SECRET` into `.env`.**
 
-**3. Пройди авторизацию** — один раз:
+**3. Authorize once:**
 
 ```bash
 uv run oura-mcp auth
 ```
 
-Команда поднимет локальный сервер на адресе из `OURA_REDIRECT_URI`, откроет
-браузер и после подтверждения сохранит токены в `.oura/tokens.json` (права
-`600`). Дальше сервер обновляет их сам.
+This starts a local server on your `OURA_REDIRECT_URI`, opens a browser, and
+stores tokens in `.oura/tokens.json` with mode `600`. The server refreshes
+them on its own from there.
 
-**4. Переключи `OURA_API_MODE=production`** в `.env`.
+**4. Set `OURA_API_MODE=production`** in `.env`.
 
-Вспомогательное:
+Housekeeping:
 
 ```bash
-uv run oura-mcp auth --status   # авторизован ли, сколько живёт токен
-uv run oura-mcp auth --logout   # забыть токены
+uv run oura-mcp auth --status   # authorized? how long is the token good for?
+uv run oura-mcp auth --logout   # forget stored tokens
 ```
 
-> Personal Access Token больше не подойдёт: Oura прекратила их выпуск в декабре
-> 2025, доступ только через OAuth2.
+> Personal Access Tokens no longer work: Oura stopped issuing them in
+> December 2025. OAuth2 is the only way in.
 
-> **Refresh-токен одноразовый.** При каждом обновлении Oura выдаёт новый и
-> аннулирует прежний, поэтому два сервера с общим хранилищем выбьют друг друга
-> из авторизации. Признак — `400` с сообщением про одноразовость: лечится
-> повторным `oura-mcp auth` и переходом на один живой экземпляр.
+> **Refresh tokens are single-use.** Each refresh mints a new one and kills the
+> old, so two servers sharing a token store will knock each other out. The
+> symptom is a `400` mentioning single use; the cure is re-running
+> `oura-mcp auth` and keeping exactly one live instance.
 
-## Конфигурация
+## Configuration
 
-Всё через `.env` (см. `.env.example`). Секреты в git не попадают.
+Everything lives in `.env` (see `.env.example`). Secrets never reach git.
 
-| Переменная | Назначение |
+| Variable | Purpose |
 |---|---|
-| `OURA_CLIENT_ID` / `OURA_CLIENT_SECRET` | Учётные данные приложения Oura |
-| `OURA_REDIRECT_URI` | Должен совпадать с указанным в приложении |
-| `OURA_API_MODE` | `sandbox` (тестовые данные) или `production` |
-| `OURA_TZ` | Часовой пояс для трактовки «сегодня». **На сервере задать явно** |
-| `OURA_TOKEN_STORE` | Куда OAuth-флоу пишет токены. Руками не заполняется |
-| `OURA_CACHE_DB` | Файл кэша SQLite |
+| `OURA_CLIENT_ID` / `OURA_CLIENT_SECRET` | Oura application credentials |
+| `OURA_REDIRECT_URI` | Must match the application exactly |
+| `OURA_API_MODE` | `sandbox` (synthetic data) or `production` |
+| `OURA_TZ` | Timezone deciding what "today" means. **Set explicitly on servers** |
+| `OURA_MCP_TOKEN` | Shared secret guarding the HTTP endpoint (remote only) |
+| `OURA_TOKEN_STORE` | Where the OAuth flow writes tokens. Not set by hand |
+| `OURA_CACHE_DB` | SQLite cache file |
 
-Почему `OURA_TZ` важен: на хосте в UTC системное «сегодня» отличается от твоего,
-и запрос «сон за вчера» вернёт не ту ночь.
+## Running it
 
-## Запуск
+The same code serves both cases — only the transport differs.
 
-Один и тот же код обслуживает оба сценария — различается только транспорт.
-
-### Локально: Claude Code на этой машине
+### Locally, in Claude Code
 
 ```bash
-claude mcp add --scope user oura -- uv --directory /путь/к/oura_mcp run oura-mcp
+claude mcp add --scope user oura -- uv --directory /path/to/oura_mcp run oura-mcp
 ```
 
-`--scope user` делает сервер видимым из любого каталога; без него он
-подключится только в той папке, где выполнена команда. Проверка:
+`--scope user` makes the server visible from any directory; without it, only
+from where you ran the command. Verify with `claude mcp list`.
 
-```bash
-claude mcp list
-```
-
-Транспорт stdio, сеть не задействована, ничего наружу не открывается.
-
-### Локально по HTTP: отладка транспорта
+### Locally over HTTP, for debugging
 
 ```bash
 uv run oura-mcp --transport http --port 8000
 ```
 
-На loopback-адресе секрет не требуется. Здесь удобно воспроизводить то, что
-потом будет происходить на сервере.
+No secret required on loopback.
 
-### Глобально: свой сервер, доступ отовсюду
+### Remotely, reachable from anywhere
 
-Даёт доступ с любого устройства и из веб-интерфейса claude.ai. Нужны сервер с
-публичным IP и домен, A-запись которого уже ведёт на этот сервер.
+This is what makes the server usable from any device and from claude.ai in the
+browser. You need a host with a public IP and a domain already pointing at it.
 
-> Не разворачивай это на том же хосте, где живёт VPN: публичный HTTPS-домен на
-> том же IP портит его репутацию и привлекает к нему внимание.
-
-**1. Подготовь секреты** на сервере, в `.env`:
+**1. Prepare secrets** in `.env` on the host:
 
 ```bash
 python3 -c "import secrets;print(secrets.token_urlsafe(32))"
 ```
 
-Полученную строку — в `OURA_MCP_TOKEN`, домен — в `OURA_DOMAIN`, и
-`OURA_TZ=Europe/Moscow` (системное время сервера почти наверняка UTC).
+That string goes into `OURA_MCP_TOKEN`, your domain into `OURA_DOMAIN`, and
+`OURA_TZ` to your actual timezone — a server's clock is almost certainly UTC.
 
-**2. Подними**:
+**2. Bring it up:**
 
 ```bash
 docker compose up -d
 ```
 
-Caddy сам выпустит TLS-сертификат. Наружу смотрит только он; порт MCP остаётся
-внутри сети Docker. Проверка живости — `curl https://твой-домен/healthz`,
-она не требует токена и не отдаёт данных.
+Caddy issues the TLS certificate itself. Only Caddy is exposed; the MCP port
+stays inside the Docker network. Liveness check is `curl https://your-domain/healthz`,
+which needs no token and returns no data.
 
-**3. Подключи claude.ai**: Settings → Connectors → Add custom connector, URL
-`https://твой-домен/mcp`. В разделе **Request headers** добавь заголовок
-`Authorization` со значением `Bearer <твой OURA_MCP_TOKEN>` — целиком, вместе
-со словом `Bearer` и пробелом.
+**3. Connect claude.ai:** Settings → Connectors → Add custom connector, URL
+`https://your-domain/mcp`. Under **Request headers** add `Authorization` with
+the value `Bearer <your OURA_MCP_TOKEN>` — including the word `Bearer` and the
+space.
 
-> Аутентификация по request headers у Claude в стадии beta и раскатана не на
-> всех. Если раздела в диалоге нет, дождись доступа — обходной путь требует
-> полноценного OAuth 2.1-сервера на стороне MCP.
+> Request-header authentication is in beta at Claude and not rolled out to
+> everyone. If the section is missing, the alternative requires a full
+> OAuth 2.1 server on the MCP side.
 
-**4. Подключи Claude Code** с любой машины:
+**4. Connect Claude Code** from any machine:
 
 ```bash
-claude mcp add --scope user --transport http oura https://твой-домен/mcp --header "Authorization: Bearer ТВОЙ_ТОКЕН"
+claude mcp add --scope user --transport http oura https://your-domain/mcp --header "Authorization: Bearer YOUR_TOKEN"
 ```
 
-Без заголовка или с неверным токеном эндпоинт отвечает `401` и до данных не
-допускает.
+Without the header, or with a wrong token, the endpoint answers `401`.
 
-### Что выбрать
+### Which one
 
-| | stdio локально | HTTP на сервере |
+| | stdio, local | HTTP, remote |
 |---|---|---|
-| Доступ из Claude Code на этой машине | да | да |
-| Доступ с других устройств | нет | да |
-| Доступ из claude.ai в браузере | нет | да |
-| Нужен домен и сервер | нет | да |
-| Данные покидают машину | нет | да, на твой сервер |
+| Claude Code on this machine | yes | yes |
+| Other devices | no | yes |
+| claude.ai in the browser | no | yes |
+| Needs a domain and a host | no | yes |
+| Data leaves the machine | no | yes, to your host |
 
-Держи **один живой экземпляр**: refresh-токен Oura одноразовый, и два сервера
-с общим хранилищем токенов будут выбивать друг друга из авторизации. Подняв
-удалённый, переключи на него и локальный Claude Code — вариантом из шага 4.
+Keep **one live instance**: Oura's refresh token is single-use, and two servers
+sharing a token store will fight. Once the remote one is up, point Claude Code
+at it too, using step 4.
 
-## Безопасность
+## Timezone handling
 
-- `.env`, хранилище токенов и кэш перечислены в `.gitignore`. Проверяй перед
-  коммитом: `git status --porcelain`.
-- Refresh-токен Oura **одноразовый** — при каждом обновлении выдаётся новый.
-  Два экземпляра сервера с одним токеном будут выбивать друг друга из
-  авторизации. Держи один живой инстанс: когда поднимешь удалённый, направляй
-  на него и Claude Code.
-- HTTP-эндпоинт закрыт общим секретом `OURA_MCP_TOKEN` (сравнение постоянного
-  времени). Модель доступа намеренно простая: один секрет, один владелец,
-  разграничения между пользователями нет.
-- **Сервер не запустится на внешнем адресе без секрета** — вместо тихой отдачи
-  медданных в открытый интернет он откажется стартовать. Проверить локально:
+Three separate bugs came from Oura's date semantics, all of which lost data
+silently rather than raising an error. Worth knowing if you build against this
+API yourself:
+
+- **`sleep` and `daily_activity` are filtered by an internal UTC timestamp**,
+  not by the `day` field Oura itself returns. At UTC+3 a night that starts
+  after midnight lands in the previous UTC day: asking for `28..28` returns
+  nothing while the record with `day=28` plainly exists. The server widens the
+  window and trims by `day` afterwards. Verified by sweeping every endpoint;
+  the other six behave.
+- **`heartrate` returns timestamps in UTC.** Grouping by the first ten
+  characters of that string splits a local day in two, pushing 00:00–03:00
+  local into the previous day — exactly the resting heart rate you care about.
+  Grouping uses `OURA_TZ`.
+- **Oura returns several sleep records per day** — the night plus naps. Picking
+  an arbitrary one lets a 12-minute nap displace a full night. The record typed
+  `long_sleep` wins, or the longest one; naps are reported separately as
+  `naps_h` so their HRV never averages with the night's.
+
+## Security
+
+- `.env`, the token store and the cache are in `.gitignore`. Verify before
+  committing: `git status --porcelain`.
+- The HTTP endpoint is guarded by `OURA_MCP_TOKEN` using a constant-time
+  comparison. The access model is deliberately simple: one secret, one owner,
+  no per-user separation.
+- **The server refuses to start on a non-loopback address without a secret**
+  rather than quietly serving health data to the open internet. Try it:
   `uv run oura-mcp --transport http --host 0.0.0.0`.
-- Путь `/healthz` открыт без токена намеренно — он нужен reverse proxy и не
-  отдаёт ничего, кроме `ok`.
-- Заголовок `Authorization` вычищается из логов Caddy.
+- `/healthz` is intentionally open — a reverse proxy needs it, and it returns
+  nothing but `ok`.
+- Caddy strips the `Authorization` header from its logs.
 
-## Разработка
+## Development
 
 ```bash
 uv run pytest
 ```
 
-Тесты идут на зафиксированных ответах и сеть не трогают.
+Tests never touch the network; Oura's responses are stubbed with `respx`.
+Tool tests go through `mcp.call_tool()` rather than calling the functions
+directly — some bugs only appear on the real protocol layer, where MCP clients
+pass declared defaults as explicit arguments.
 
-**x86_64 macOS:** `cryptography` с версии 49 не публикует бинарное колесо под
-эту платформу и пытается собраться из Rust-исходников. В `pyproject.toml` стоит
-прицельное ограничение на `48.0.0`; Linux и нативный arm64 оно не затрагивает.
+**x86_64 macOS:** `cryptography` 49+ ships no wheel for this platform and tries
+to build from Rust sources. `pyproject.toml` pins `48.0.0` for it specifically;
+Linux and native arm64 are untouched. This bites Apple Silicon too whenever
+Homebrew lives in `/usr/local` rather than `/opt/homebrew` — check with
+`file $(which python3)`.
 
-Это касается не только Intel-машин. Если Homebrew установлен в `/usr/local`
-(а не в `/opt/homebrew`), то на Apple Silicon весь Python-стек всё равно
-x86_64 и идёт через Rosetta. Проверить: `file $(which python3)`.
+**Flaky network:** if requests to `api.ouraring.com` fail with
+`SSL_ERROR_SYSCALL` or time out, it usually isn't the server. The client makes
+four attempts with backoff; beyond that, try a VPN.
 
-**Перебои сети:** если запросы к `api.ouraring.com` рвутся с
-`SSL_ERROR_SYSCALL` или таймаутом, дело обычно не в сервере. Клиент делает 4
-попытки с бэкоффом; если не помогает — включи VPN.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for what's planned and what was
+deliberately deferred.
 
-## Лицензия
+## License
 
 MIT
