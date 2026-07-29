@@ -5,6 +5,36 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-07-30
+
+### Fixed
+
+- **Reflected XSS on the consent page.** The authorization request id came from a
+  query parameter and was interpolated into HTML unescaped, so a link like
+  `?request="><script>…` could inject a script into the very page where the owner
+  types the shared secret — and read that field. The id is now escaped, and the
+  page ships a `Content-Security-Policy` with `default-src 'none'` (the page has
+  no scripts of its own, so the ban is total), `form-action 'self'`,
+  `frame-ancestors 'none'` plus `X-Frame-Options` against clickjacking, and
+  `Referrer-Policy: no-referrer`.
+- OAuth no longer stays off silently. Setting `OURA_PUBLIC_URL` without
+  `OURA_MCP_TOKEN` used to start a server with no OAuth and no warning; the
+  failure surfaced only when claude.ai refused to connect.
+- Refresh tokens expire after 90 days and expired rows are pruned when new tokens
+  are issued. Previously every reconnect left a row behind forever.
+- `/healthz` is answered in one place instead of two. The middleware still lets it
+  through without a token — that is what keeps the Docker `HEALTHCHECK` working —
+  but the response comes from the route, which exists in both auth modes.
+
+### Changed
+
+- Documentation: deployment was described twice and had started to drift, so the
+  README now summarizes and links to `docs/DEPLOY.md`. Quick start moved above the
+  feature list, a sample response and a plain-language note on what MCP is were
+  added up front, and a troubleshooting section covers the common failures — a
+  `401` from a missing `Bearer` prefix, an unset `OURA_TZ`, a spent refresh token,
+  a mismatched `OURA_PUBLIC_URL`.
+
 ## [0.2.0] — 2026-07-29
 
 Reaching the server from claude.ai, including the mobile apps.
@@ -75,6 +105,7 @@ Five defects that all shared one trait — data disappeared with no error raised
   an explicit argument, breaking every request that also carried explicit
   dates.
 
-[Unreleased]: https://github.com/AntVsl/oura_mcp/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/AntVsl/oura_mcp/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/AntVsl/oura_mcp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/AntVsl/oura_mcp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/AntVsl/oura_mcp/releases/tag/v0.1.0

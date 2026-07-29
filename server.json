@@ -3,7 +3,7 @@
   "name": "io.github.AntVsl/oura-mcp",
   "title": "Oura Ring",
   "description": "Sleep, readiness, activity, HRV, resting heart rate, SpO2 and stress from an Oura Ring. Returns compact summaries by default with raw API responses on request.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "websiteUrl": "https://github.com/AntVsl/oura_mcp#readme",
   "repository": {
     "url": "https://github.com/AntVsl/oura_mcp",
@@ -14,7 +14,7 @@
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "my-oura-mcp",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
@@ -64,7 +64,7 @@
       "registryType": "oci",
       "registryBaseUrl": "https://docker.io",
       "identifier": "iican/oura-mcp",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "transport": {
         "type": "streamable-http",
         "url": "http://localhost:8000/mcp"
