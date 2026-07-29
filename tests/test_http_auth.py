@@ -80,8 +80,15 @@ async def test_token_without_bearer_scheme_is_rejected():
 
 
 async def test_health_check_needs_no_token():
+    """Без токена health обязан пройти: на нём висит HEALTHCHECK из Dockerfile.
+
+    Middleware его пропускает, а отвечает маршрут в server.py — ответ живёт в
+    одном месте, потому что при включённом OAuth этого middleware в стеке нет
+    вовсе, а health-check нужен в обоих режимах.
+    """
     status, reached = await call([], path=HEALTH_PATH)
-    assert status == 200 and not reached, "health не должен доходить до MCP"
+    assert status == 200
+    assert reached, "health должен доходить до приложения, где его обслуживает маршрут"
 
 
 async def test_non_http_scope_passes_through():

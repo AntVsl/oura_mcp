@@ -16,7 +16,9 @@
       "identifier": "my-oura-mcp",
       "version": "0.2.0",
       "runtimeHint": "uvx",
-      "transport": { "type": "stdio" },
+      "transport": {
+        "type": "stdio"
+      },
       "environmentVariables": [
         {
           "name": "OURA_CLIENT_ID",
@@ -49,6 +51,12 @@
           "name": "OURA_TOKEN_STORE",
           "description": "Where the OAuth flow stores tokens. Written by the server, not set by hand",
           "default": ".oura/tokens.json"
+        },
+        {
+          "name": "OURA_PUBLIC_URL",
+          "description": "Public https address of this server, without a trailing slash. When set, the server runs its own OAuth 2.1 authorization server so claude.ai and the mobile apps can connect; leave empty for Claude Code, which authenticates with OURA_MCP_TOKEN",
+          "isRequired": false,
+          "isSecret": false
         }
       ]
     },
@@ -67,6 +75,12 @@
           "description": "Shared secret guarding the HTTP endpoint. Required whenever the server binds to anything other than loopback; without it the server refuses to start",
           "isRequired": true,
           "isSecret": true
+        },
+        {
+          "name": "OURA_PUBLIC_URL",
+          "description": "Public https address of this server, without a trailing slash. When set, the server runs its own OAuth 2.1 authorization server so claude.ai and the mobile apps can connect; leave empty for Claude Code, which authenticates with OURA_MCP_TOKEN",
+          "isRequired": false,
+          "isSecret": false
         },
         {
           "name": "OURA_CLIENT_ID",

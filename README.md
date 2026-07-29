@@ -4,10 +4,31 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 
-An MCP server that gives Claude access to your Oura Ring data.
+Gives Claude access to your Oura Ring data: sleep, readiness, HRV, resting
+heart rate, activity, SpO₂, stress.
 
 Ask "how did I sleep last week" and Claude calls the right tool and gets a
-summary back — not a wall of JSON.
+summary back — not a wall of JSON:
+
+```json
+{
+  "metric": "sleep_detail",
+  "period": { "start": "2026-07-23", "end": "2026-07-29", "days": 7 },
+  "stats": {
+    "total_h":    { "mean": 7.1, "min": 5.9, "max": 8.4 },
+    "deep_h":     { "mean": 1.3, "min": 0.9, "max": 1.8 },
+    "avg_hrv":    { "mean": 42,  "min": 31,  "max": 55, "trend_per_week": 1.8 },
+    "efficiency": { "mean": 88,  "min": 82,  "max": 93 }
+  }
+}
+```
+
+> **New to MCP?** Model Context Protocol is how Claude reaches external data.
+> Install this server, connect it once, then just ask Claude about your sleep in
+> plain language. No coding involved.
+
+Works in Claude Code in the terminal and in claude.ai — including the mobile
+app, once it's deployed to a server of your own.
 
 *Читать по-русски: [README.ru.md](README.ru.md)*
 
@@ -154,42 +175,27 @@ No secret required on loopback.
 
 ### Remotely, reachable from anywhere
 
-This is what makes the server usable from any device and from claude.ai in the
-browser. You need a host with a public IP and a domain already pointing at it.
+This is what makes the server usable from any device, from claude.ai, and from
+the phone. You need a host with a public address and a domain of your own.
 
-**1. Prepare secrets** in `.env` on the host:
+The step-by-step runbook is **[docs/DEPLOY.md](docs/DEPLOY.md)** (Russian) — how
+to let traffic in, how to move Oura authorization onto the server, how to
+connect claude.ai. What follows is only what makes this path different.
 
-```bash
-python3 -c "import secrets;print(secrets.token_urlsafe(32))"
-```
+There are two ways to expose the server, and the choice is not cosmetic. Caddy
+with a Let's Encrypt certificate is simpler, but the certificate lands in
+Certificate Transparency, a public log, which reveals that this address hosts a
+service. A Cloudflare Tunnel opens no inbound ports at all. If a VPN lives on
+the same host, only the tunnel will do.
 
-That string goes into `OURA_MCP_TOKEN`, your domain into `OURA_DOMAIN`, and
-`OURA_TZ` to your actual timezone — a server's clock is almost certainly UTC.
+claude.ai connects over OAuth, which `OURA_PUBLIC_URL` turns on: the server
+becomes its own authorization server with dynamic client registration. No client
+ID or secret to enter in the connector dialog — Claude registers itself, and the
+consent page asks for the same `OURA_MCP_TOKEN`. The connector is added once on
+the web and is then available in every Claude client on the account, including
+the mobile app.
 
-**2. Bring it up:**
-
-```bash
-docker compose up -d
-```
-
-Caddy issues the TLS certificate itself. Only Caddy is exposed; the MCP port
-stays inside the Docker network. Liveness check is `curl https://your-domain/healthz`,
-which needs no token and returns no data.
-
-**3. Connect claude.ai:** Settings → Connectors → Add custom connector, URL
-`https://your-domain/mcp`. No client ID or secret to enter — Claude registers
-itself, and the consent page asks for the same `OURA_MCP_TOKEN`.
-
-This works when `OURA_PUBLIC_URL` is set: it turns on the built-in OAuth 2.1
-authorization server with dynamic client registration. Claude also accepts a
-static header, but that field is a limited beta and may be absent from the
-dialog entirely.
-
-The connector is added once on the web and is then available in every Claude
-client on the account, including the iPhone app. Details and debugging live in
-[docs/DEPLOY.md](docs/DEPLOY.md) (Russian).
-
-**4. Connect Claude Code** from any machine:
+Claude Code connects from any machine with a header, no OAuth involved:
 
 ```bash
 claude mcp add --scope user --transport http oura https://your-domain/mcp --header "Authorization: Bearer YOUR_TOKEN"
@@ -245,6 +251,37 @@ API yourself:
 - `/healthz` is intentionally open — a reverse proxy needs it, and it returns
   nothing but `ok`.
 - Caddy strips the `Authorization` header from its logs.
+
+## When something doesn't work
+
+**Claude says there are no Oura tools.** The server didn't connect. `claude mcp
+list` shows its state. A common cause is a relative path in `claude mcp add`
+where a full one is required.
+
+**"Авторизация не пройдена — токенов нет".** The server is in `production` mode
+but has never signed in to Oura. Run `uv run my-oura-mcp auth`; check token state
+with `uv run my-oura-mcp auth --status`.
+
+**`401` against a server on a VPS.** `OURA_MCP_TOKEN` doesn't match. Header
+values are sent verbatim, so the word `Bearer` and the space belong to the value:
+`Bearer abc123`, not `abc123`.
+
+**Data comes back for the wrong day.** `OURA_TZ` isn't set. A server clock is
+almost always UTC, so "today" starts hours off from yours and a night's sleep
+lands in the previous day. Set it explicitly, e.g. `OURA_TZ=Europe/Moscow`.
+
+**"refresh-токен отвергнут".** Oura's refresh token is single-use, and this
+happens when a second instance spent it. Keep exactly one alive: once the VPS is
+up, point local Claude Code at it too. Recover with `my-oura-mcp auth`.
+
+**Requests to `api.ouraring.com` fail** with `SSL_ERROR_SYSCALL` or a timeout.
+Usually not the server: the client retries four times with backoff. If that
+doesn't help, a VPN generally does.
+
+**claude.ai won't connect to your server.** Check that `OURA_PUBLIC_URL` is set
+and matches the connector URL character for character, including `https://` and
+no trailing slash. The startup banner says whether OAuth came up. Beyond that,
+see [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Development
 

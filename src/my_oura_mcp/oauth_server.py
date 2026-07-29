@@ -29,6 +29,7 @@ MCP-сервере: статический заголовок и OAuth. Перв
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import secrets
@@ -59,6 +60,12 @@ CODE_TTL_SEC = 60
 # Согласие ждём десять минут — столько человек может вводить пароль на
 # телефоне, переключаясь в менеджер паролей и обратно.
 PENDING_TTL_SEC = 600
+
+# Refresh-токен живёт три месяца. Срок нужен не столько для безопасности,
+# сколько против бесконечного роста: без него каждое переподключение claude.ai
+# оставляло бы в хранилище запись навсегда. Три месяца — с запасом больше
+# любого разумного простоя телефона, так что переспрашивать секрет не придётся.
+REFRESH_TTL_SEC = 90 * 24 * 3600
 
 
 class OAuthStore:
@@ -111,6 +118,27 @@ class OAuthStore:
 
     def drop(self, bucket: str, key: str) -> None:
         if self._data[bucket].pop(key, None) is not None:
+            self._flush()
+
+    def prune_expired(self, now: float) -> None:
+        """Выбрасывает протухшие токены из обоих вёдер.
+
+        Ленивая уборка вместо фонового таймера: вызывается в момент выдачи
+        новых токенов, то есть примерно раз в час на активном сервере. Своего
+        планировщика ради этого поднимать незачем, а без уборки вовсе файл
+        растёт от каждого переподключения и никогда не уменьшается.
+        """
+        changed = False
+        for bucket in ("access", "refresh"):
+            keep = {
+                token: row
+                for token, row in self._data[bucket].items()
+                if not row.get("expires_at") or row["expires_at"] > now
+            }
+            if len(keep) != len(self._data[bucket]):
+                self._data[bucket] = keep
+                changed = True
+        if changed:
             self._flush()
 
     def drop_where(self, bucket: str, field: str, value: Any) -> None:
@@ -249,9 +277,14 @@ class OuraAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refre
         return self._issue(client.client_id, scopes or refresh_token.scopes, None)
 
     def _issue(self, client_id: str, scopes: list[str], resource: str | None) -> OAuthToken:
+        now = int(time.time())
+        # Уборка приурочена к выдаче: на активном сервере это примерно раз в час,
+        # чаще не нужно, а отдельный таймер ради этого не стоит завода.
+        self._store.prune_expired(now)
+
         access = secrets.token_urlsafe(32)
         refresh = secrets.token_urlsafe(32)
-        expires_at = int(time.time()) + ACCESS_TTL_SEC
+        expires_at = now + ACCESS_TTL_SEC
 
         self._store.put(
             "access",
@@ -268,7 +301,13 @@ class OuraAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refre
         self._store.put(
             "refresh",
             refresh,
-            {"token": refresh, "client_id": client_id, "scopes": scopes, "subject": "owner"},
+            {
+                "token": refresh,
+                "client_id": client_id,
+                "scopes": scopes,
+                "expires_at": now + REFRESH_TTL_SEC,
+                "subject": "owner",
+            },
         )
         return OAuthToken(
             access_token=access,
@@ -365,6 +404,48 @@ CONSENT_HTML = """<!doctype html>
 ERROR_BLOCK = '<p class="err">Не подошло. Проверь секрет и попробуй ещё раз.</p>'
 
 
+# Заголовки страницы согласия. Каждый закрывает свою дыру, а вместе они делают
+# внедрение неисполнимым даже если экранирование однажды прохлопают.
+#
+#   default-src 'none'  скриптов на странице нет вообще, поэтому запрет полный:
+#                       внедрённый <script> просто не исполнится
+#   style-src            только для инлайнового <style> ниже
+#   form-action 'self'   форму с секретом нельзя перенаправить на чужой хост
+#   frame-ancestors      страницу нельзя обернуть в iframe (clickjacking:
+#                        поверх формы кладут прозрачный слой и ловят ввод)
+#   no-store             в кэш и историю страница с полем секрета не попадает
+#   no-referrer          идентификатор заявки не утечёт в Referer
+CONSENT_HEADERS = {
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": (
+        "default-src 'none'; style-src 'unsafe-inline'; "
+        "form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+    ),
+    # Дубль frame-ancestors для браузеров, которые его не знают.
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+def _consent_page(request_id: str, error: bool = False) -> HTMLResponse:
+    """Страница согласия с экранированным идентификатором заявки.
+
+    Экранирование здесь обязательно и неочевидно: `request_id` приходит из
+    query-параметра, то есть управляется тем, кто прислал ссылку. Без escape
+    ссылка вида `?request="><script>…` внедряла бы скрипт в страницу, где
+    владелец вводит секрет, — и скрипт читал бы это поле. Пример есть в тестах.
+    """
+    return HTMLResponse(
+        CONSENT_HTML.format(
+            request_id=html.escape(request_id, quote=True),
+            error=ERROR_BLOCK if error else "",
+        ),
+        status_code=401 if error else 200,
+        headers=CONSENT_HEADERS,
+    )
+
+
 def register_consent_route(mcp, provider: OuraAuthProvider, path: str = "/oauth/consent") -> None:
     """Вешает страницу согласия на сервер.
 
@@ -375,25 +456,16 @@ def register_consent_route(mcp, provider: OuraAuthProvider, path: str = "/oauth/
     @mcp.custom_route(path, methods=["GET", "POST"])
     async def consent(request: Request):
         if request.method == "GET":
-            request_id = request.query_params.get("request", "")
             # Несуществующую заявку показываем той же формой, без пояснений:
             # разница в ответах подсказывала бы, какие идентификаторы живые.
-            return HTMLResponse(
-                CONSENT_HTML.format(request_id=request_id, error=""),
-                # Страница содержит поле с секретом — в кэш ей нельзя.
-                headers={"Cache-Control": "no-store"},
-            )
+            return _consent_page(request.query_params.get("request", ""))
 
         form = await request.form()
         request_id = str(form.get("request", ""))
         redirect = provider.grant(request_id, str(form.get("password", "")))
         if redirect is None:
-            return HTMLResponse(
-                CONSENT_HTML.format(request_id=request_id, error=ERROR_BLOCK),
-                status_code=401,
-                headers={"Cache-Control": "no-store"},
-            )
-        # 303: после POST браузер обязан пойтиGET'ом, иначе повторная отправка
+            return _consent_page(request_id, error=True)
+        # 303: после POST браузер обязан пойти GET'ом, иначе повторная отправка
         # формы по «назад» уткнётся в уже потраченную заявку.
         return RedirectResponse(redirect, status_code=303)
 

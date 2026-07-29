@@ -114,6 +114,18 @@ def _serve(settings: Settings, argv: list[str]) -> int:
         return 3
 
     oauth = settings.oauth_enabled and endpoint_token is not None
+    if settings.oauth_enabled and not oauth:
+        # Молчать здесь нельзя: человек задал публичный адрес, то есть просил
+        # OAuth, а получил бы сервер без него — и узнал бы об этом только когда
+        # claude.ai откажется подключаться. Секрет нужен потому, что он же
+        # служит паролем на странице согласия.
+        print(
+            f"Внимание: OURA_PUBLIC_URL={settings.public_url} задан, но OAuth не "
+            "включён — нет OURA_MCP_TOKEN, а он служит паролем на странице "
+            "согласия. Сервер поднимется без OAuth, и claude.ai к нему не "
+            "подключится.",
+            file=sys.stderr,
+        )
     mcp = build(
         settings,
         provider,
