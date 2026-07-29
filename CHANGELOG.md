@@ -5,6 +5,36 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Built-in OAuth 2.1 authorization server, enabled by setting
+  `OURA_PUBLIC_URL`. This is what makes the server connectable from claude.ai
+  and the mobile apps: the static-header field is a limited beta and may be
+  absent from the connector dialog. Dynamic Client Registration is supported,
+  so nothing has to be configured on the Claude side. The protocol layer comes
+  from the official SDK (`mcp.server.auth`) — PKCE S256, code and token
+  lifetimes, `redirect_uri` consistency; this package supplies only policy and
+  storage.
+- Consent page at `/oauth/consent`, laid out for phones. It asks for the
+  existing `OURA_MCP_TOKEN` rather than introducing a second password.
+- `"none"` is advertised in `token_endpoint_auth_methods_supported`. The SDK
+  hardcodes that list without it, yet serves public clients correctly — and
+  Claude registers as a public client under DCR. A custom route cannot win over
+  the SDK's, so an ASGI middleware amends the finished response instead of
+  replacing the document, leaving room for fields the SDK may add later.
+- Deployment runbook in `docs/DEPLOY.md`, plus `compose.server.yml` with two
+  entrances: `compose.caddy.yml` (direct, Let's Encrypt) and
+  `compose.tunnel.yml` (Cloudflare Tunnel, no inbound ports and the origin IP
+  stays out of Certificate Transparency).
+
+### Changed
+
+- The shared secret now also works as a non-expiring access token, so a single
+  code path serves both Claude Code (header) and claude.ai (OAuth). Existing
+  `claude mcp add --header` setups keep working unchanged.
+- `/healthz` is a route rather than a middleware branch, so it survives with
+  OAuth enabled — the Docker `HEALTHCHECK` depends on it.
+
 ## [0.1.0] — 2026-07-28
 
 First release.

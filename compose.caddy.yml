@@ -1,0 +1,30 @@
+# Вход снаружи: Caddy на 80/443 с автоматическим сертификатом Let's Encrypt.
+#
+#   docker compose -f compose.server.yml -f compose.caddy.yml up -d
+#
+# Домен должен A-записью указывать на этот сервер ДО первого запуска, иначе
+# проверка Let's Encrypt не пройдёт и Caddy уйдёт в повторные попытки.
+#
+# Важно понимать цену: выпущенный сертификат попадает в Certificate
+# Transparency — публичный лог, по которому домен и его адрес ищутся кем
+# угодно. Если на хосте живёт VPN, бери compose.tunnel.yml.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      OURA_DOMAIN: ${OURA_DOMAIN:?укажи OURA_DOMAIN в .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - oura-mcp
+
+volumes:
+  caddy-data:
+  caddy-config:

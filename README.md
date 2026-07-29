@@ -126,7 +126,8 @@ Everything lives in `.env` (see `.env.example`). Secrets never reach git.
 | `OURA_REDIRECT_URI` | Must match the application exactly |
 | `OURA_API_MODE` | `sandbox` (synthetic data) or `production` |
 | `OURA_TZ` | Timezone deciding what "today" means. **Set explicitly on servers** |
-| `OURA_MCP_TOKEN` | Shared secret guarding the HTTP endpoint (remote only) |
+| `OURA_MCP_TOKEN` | Shared secret guarding the HTTP endpoint; also the consent-page password |
+| `OURA_PUBLIC_URL` | Public `https` address. When set, enables OAuth for claude.ai |
 | `OURA_TOKEN_STORE` | Where the OAuth flow writes tokens. Not set by hand |
 | `OURA_CACHE_DB` | SQLite cache file |
 
@@ -176,13 +177,17 @@ stays inside the Docker network. Liveness check is `curl https://your-domain/hea
 which needs no token and returns no data.
 
 **3. Connect claude.ai:** Settings → Connectors → Add custom connector, URL
-`https://your-domain/mcp`. Under **Request headers** add `Authorization` with
-the value `Bearer <your OURA_MCP_TOKEN>` — including the word `Bearer` and the
-space.
+`https://your-domain/mcp`. No client ID or secret to enter — Claude registers
+itself, and the consent page asks for the same `OURA_MCP_TOKEN`.
 
-> Request-header authentication is in beta at Claude and not rolled out to
-> everyone. If the section is missing, the alternative requires a full
-> OAuth 2.1 server on the MCP side.
+This works when `OURA_PUBLIC_URL` is set: it turns on the built-in OAuth 2.1
+authorization server with dynamic client registration. Claude also accepts a
+static header, but that field is a limited beta and may be absent from the
+dialog entirely.
+
+The connector is added once on the web and is then available in every Claude
+client on the account, including the iPhone app. Details and debugging live in
+[docs/DEPLOY.md](docs/DEPLOY.md) (Russian).
 
 **4. Connect Claude Code** from any machine:
 

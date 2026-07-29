@@ -36,6 +36,23 @@ class Settings:
     redirect_uri: str
     token_store: Path
     cache_db: Path
+    # Публичный адрес сервера, если он развёрнут наружу: включает OAuth для
+    # claude.ai. Без него сервер работает как раньше — на общем секрете.
+    public_url: str | None = None
+
+    @property
+    def oauth_enabled(self) -> bool:
+        return self.public_url is not None
+
+    @property
+    def resource_url(self) -> str:
+        """URL самого MCP-эндпоинта.
+
+        Он же идентификатор ресурса в метаданных OAuth, и совпадать с тем, что
+        человек вводит в claude.ai, должен посимвольно — включая путь. Отсюда
+        и требование к OURA_PUBLIC_URL быть без хвостового слэша.
+        """
+        return f"{self.public_url}/mcp"
 
     @property
     def is_sandbox(self) -> bool:
@@ -82,6 +99,15 @@ def load_settings(env_file: Path | None = None) -> Settings:
         raw = Path(os.getenv(key, default))
         return raw if raw.is_absolute() else root / raw
 
+    public_url = (os.getenv("OURA_PUBLIC_URL") or "").strip().rstrip("/") or None
+    if public_url and not public_url.startswith("https://"):
+        # Не придирка: по этому адресу ходят коды авторизации и токены, а
+        # claude.ai к http-эндпоинту всё равно не подключится.
+        raise ConfigError(
+            f"OURA_PUBLIC_URL={public_url!r} — нужен https. "
+            "Через http OAuth-коды и токены пошли бы открытым текстом."
+        )
+
     return Settings(
         mode=mode,
         tz=tz,
@@ -92,4 +118,5 @@ def load_settings(env_file: Path | None = None) -> Settings:
         ).strip(),
         token_store=_path("OURA_TOKEN_STORE", ".oura/tokens.json"),
         cache_db=_path("OURA_CACHE_DB", ".oura/cache.db"),
+        public_url=public_url,
     )

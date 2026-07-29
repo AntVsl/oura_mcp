@@ -1,0 +1,27 @@
+# Вход снаружи: Cloudflare Tunnel.
+#
+#   docker compose -f compose.server.yml -f compose.tunnel.yml up -d
+#
+# cloudflared держит исходящее соединение к Cloudflare, поэтому портов наружу
+# не открывается вообще, а сертификатом владеет Cloudflare — IP этого сервера в
+# Certificate Transparency не попадает и снаружи не виден. Ради этого туннель и
+# берётся: на хосте с VPN обычный Caddy засветил бы адрес.
+#
+# Цена: трафик расшифровывается на стороне Cloudflare. Для медданных это
+# осознанный размен, а не мелочь.
+#
+# Маршрут (какое имя ведёт на http://oura-mcp:8000) задаётся в панели
+# Cloudflare при создании туннеля, а не здесь.
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    # Токен несёт в себе учётные данные туннеля, поэтому приходит окружением, а
+    # не аргументом командной строки: аргументы видны в `docker inspect` и в
+    # выводе `ps` на хосте любому, кто там есть.
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?укажи CLOUDFLARE_TUNNEL_TOKEN в .env}
+    depends_on:
+      - oura-mcp

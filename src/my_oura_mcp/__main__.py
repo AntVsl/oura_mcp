@@ -113,13 +113,35 @@ def _serve(settings: Settings, argv: list[str]) -> int:
         print(f"Отказ в запуске: {exc}", file=sys.stderr)
         return 3
 
-    mcp = build(settings, provider, host=args.host, port=args.port)
-    app = build_app(mcp, args.host)
+    oauth = settings.oauth_enabled and endpoint_token is not None
+    mcp = build(
+        settings,
+        provider,
+        owner_secret=endpoint_token,
+        host=args.host,
+        port=args.port,
+    )
+    # При включённом OAuth собственную проверку заголовка не вешаем: она стоит
+    # снаружи и не пропустила бы ни /authorize, ни /token, ни страницу
+    # согласия — то есть сломала бы ровно тот флоу, ради которого всё это.
+    # Общий секрет при этом продолжает работать: провайдер принимает его как
+    # бессрочный access-токен, и Claude Code ходит как раньше.
+    if oauth:
+        from .oauth_server import AdvertisePublicClients
+
+        app = AdvertisePublicClients(mcp.streamable_http_app())
+    else:
+        app = build_app(mcp, args.host)
 
     _banner(settings, f"http://{args.host}:{args.port}/mcp")
+    if oauth:
+        auth_line = f"OAuth 2.1 + общий секрет, issuer {settings.public_url}"
+    elif endpoint_token:
+        auth_line = "Bearer-токен"
+    else:
+        auth_line = "НЕТ (только loopback)"
     print(
-        f"  авторизация эндпоинта: "
-        f"{'Bearer-токен' if endpoint_token else 'НЕТ (только loopback)'}\n"
+        f"  авторизация эндпоинта: {auth_line}\n"
         f"  health-check: {HEALTH_PATH}",
         file=sys.stderr,
     )
