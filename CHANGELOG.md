@@ -5,6 +5,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-07-29
+
+Reaching the server from claude.ai, including the mobile apps.
+
 ### Added
 
 - Built-in OAuth 2.1 authorization server, enabled by setting
@@ -71,5 +75,6 @@ Five defects that all shared one trait — data disappeared with no error raised
   an explicit argument, breaking every request that also carried explicit
   dates.
 
-[Unreleased]: https://github.com/AntVsl/oura_mcp/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/AntVsl/oura_mcp/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/AntVsl/oura_mcp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/AntVsl/oura_mcp/releases/tag/v0.1.0

@@ -13,7 +13,7 @@ compact summary back, not a wall of JSON.
 | Tag | Meaning |
 |---|---|
 | `latest` | Most recent release |
-| `0.1`, `0.1.0` | Pinned versions |
+| `0.2`, `0.2.0` | Pinned versions |
 
 Built for `linux/amd64` and `linux/arm64`.
 
@@ -28,13 +28,17 @@ docker run -d \
   -e OURA_CLIENT_ID=your_client_id \
   -e OURA_CLIENT_SECRET=your_client_secret \
   -e OURA_TZ=Europe/Moscow \
+  -e OURA_PUBLIC_URL=https://mcp.example.com \
   -v oura-data:/data \
   -p 8000:8000 \
-  iican/oura-mcp:0.1.0
+  iican/oura-mcp:0.2.0
 ```
 
-Then point a client at `http://your-host:8000/mcp` with the header
-`Authorization: Bearer <your OURA_MCP_TOKEN>`.
+Then point a client at `https://your-host/mcp`. Claude Code authenticates with
+the header `Authorization: Bearer <your OURA_MCP_TOKEN>`; claude.ai and the
+mobile apps go through OAuth, which `OURA_PUBLIC_URL` enables — Claude registers
+itself and the consent page asks for that same token. Drop `OURA_PUBLIC_URL` if
+you only ever connect from Claude Code.
 
 Liveness check: `curl http://your-host:8000/healthz` — needs no token and
 returns no data.
@@ -54,7 +58,8 @@ https://pypi.org/project/my-oura-mcp/
 
 | Variable | Purpose |
 |---|---|
-| `OURA_MCP_TOKEN` | **Required.** Shared secret guarding the endpoint |
+| `OURA_MCP_TOKEN` | **Required.** Shared secret guarding the endpoint; also the consent-page password |
+| `OURA_PUBLIC_URL` | Public `https` address, no trailing slash. When set, enables OAuth so claude.ai can connect |
 | `OURA_CLIENT_ID` / `OURA_CLIENT_SECRET` | Oura application credentials from developer.ouraring.com |
 | `OURA_TZ` | IANA timezone deciding what "today" means. **Set this** — the container clock is UTC |
 | `OURA_API_MODE` | `sandbox` (Oura's synthetic data, no auth) or `production` |
