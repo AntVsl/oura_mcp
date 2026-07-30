@@ -1,6 +1,6 @@
 [project]
 name = "my-oura-mcp"
-version = "0.3.0"
+version = "0.4.0"
 description = "MCP server for Oura Ring data: sleep, readiness, HRV, resting heart rate"
 readme = "README.md"
 requires-python = ">=3.12"

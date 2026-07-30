@@ -5,6 +5,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-07-30
+
 ### Fixed
 
 - **Five endpoints silently lost data on narrow date windows.** Oura filters by
@@ -228,7 +230,8 @@ Five defects that all shared one trait — data disappeared with no error raised
   an explicit argument, breaking every request that also carried explicit
   dates.
 
-[Unreleased]: https://github.com/AntVsl/oura_mcp/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/AntVsl/oura_mcp/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/AntVsl/oura_mcp/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/AntVsl/oura_mcp/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/AntVsl/oura_mcp/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/AntVsl/oura_mcp/compare/v0.2.1...v0.2.2
