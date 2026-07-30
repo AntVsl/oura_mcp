@@ -3,7 +3,7 @@
   "name": "io.github.AntVsl/oura-mcp",
   "title": "Oura Ring",
   "description": "Sleep, readiness, HRV, resting heart rate, activity and stress from your Oura Ring",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "websiteUrl": "https://github.com/AntVsl/oura_mcp#readme",
   "repository": {
     "url": "https://github.com/AntVsl/oura_mcp",
@@ -14,7 +14,7 @@
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "my-oura-mcp",
-      "version": "0.2.3",
+      "version": "0.3.0",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
@@ -62,7 +62,7 @@
     },
     {
       "registryType": "oci",
-      "identifier": "docker.io/iican/oura-mcp:0.2.3",
+      "identifier": "docker.io/iican/oura-mcp:0.3.0",
       "transport": {
         "type": "streamable-http",
         "url": "http://localhost:8000/mcp"

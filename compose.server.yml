@@ -17,7 +17,7 @@
 
 services:
   oura-mcp:
-    image: iican/oura-mcp:${OURA_TAG:-0.2.3}
+    image: iican/oura-mcp:${OURA_TAG:-0.3.0}
     restart: unless-stopped
     env_file: .env
 
