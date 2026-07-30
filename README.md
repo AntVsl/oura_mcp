@@ -252,6 +252,23 @@ API yourself:
   nothing but `ok`.
 - Caddy strips the `Authorization` header from its logs.
 
+## Skill with recipes
+
+[skills/oura](skills/oura) ships a Claude skill — not more tools, but workflows
+on top of them: whether sleep is actually improving, whether today can take
+load, what the body was doing on a bad day, whether a change in routine did
+anything. Each is a sequence of calls plus a way to reason about the answer,
+which no single tool can express.
+
+Install it by copying into your client's skills directory:
+
+```bash
+cp -r skills/oura ~/.claude/skills/
+```
+
+The recipes are checked against the code by tests: a field name that no tool
+returns fails `uv run pytest` instead of quietly sending the model nowhere.
+
 ## When something doesn't work
 
 **Claude says there are no Oura tools.** The server didn't connect. `claude mcp

@@ -15,7 +15,13 @@ import sys
 
 from .auth import AuthError, OuraOAuth, TokenStore
 from .config import ConfigError, Settings, load_settings
-from .http import HEALTH_PATH, EndpointAuthError, build_app, resolve_token
+from .http import (
+    HEALTH_PATH,
+    EndpointAuthError,
+    build_app,
+    install_access_log_redaction,
+    resolve_token,
+)
 from .server import build
 
 
@@ -159,6 +165,10 @@ def _serve(settings: Settings, argv: list[str]) -> int:
     )
 
     import uvicorn
+
+    # До запуска: uvicorn пишет query-строки целиком, а там ездят
+    # одноразовый идентификатор заявки и authorization code.
+    install_access_log_redaction()
 
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0

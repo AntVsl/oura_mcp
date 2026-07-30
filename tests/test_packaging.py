@@ -28,13 +28,25 @@ def test_package_version_matches_pyproject():
 
 
 def test_server_json_matches_pyproject():
-    """server.json описывает сервер для реестра MCP и ссылается на артефакты."""
+    """server.json описывает сервер для реестра MCP и ссылается на артефакты.
+
+    Версия у пакетов задаётся по-разному, и это требование реестра, а не наш
+    выбор: у OCI её полагается держать только в идентификаторе
+    (`docker.io/owner/image:tag`), а поля `version` и `registryBaseUrl` там
+    запрещены — публикация с ними отвергается с 400.
+    """
     manifest = json.loads((ROOT / "server.json").read_text())
     version = declared_version()
 
     assert manifest["version"] == version
     for package in manifest.get("packages", []):
-        assert package["version"] == version, f"{package.get('identifier')} отстал"
+        identifier = package.get("identifier", "")
+        if package.get("registryType") == "oci":
+            assert "version" not in package, f"{identifier}: реестр запретит поле version"
+            assert "registryBaseUrl" not in package, f"{identifier}: и registryBaseUrl тоже"
+            assert identifier.endswith(f":{version}"), f"{identifier} отстал от {version}"
+        else:
+            assert package["version"] == version, f"{identifier} отстал"
 
 
 def test_compose_default_tag_matches_pyproject():

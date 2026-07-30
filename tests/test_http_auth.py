@@ -100,3 +100,55 @@ async def test_non_http_scope_passes_through():
 
     await BearerAuthMiddleware(app, TOKEN)({"type": "lifespan"}, None, None)
     assert seen == ["lifespan"]
+
+
+# --- вычистка секретов из журнала доступа -----------------------------------
+#
+# uvicorn пишет query-строку целиком. В логах живого сервера я своими глазами
+# видел `GET /oauth/consent?request=…` — это одноразовый секрет заявки. Доступа
+# сам по себе он не даёт (нужен ещё OURA_MCP_TOKEN), но логи читают через
+# docker logs и копируют в переписку.
+
+import logging
+
+from my_oura_mcp.http import RedactAccessLog, redact_query
+
+
+def test_request_id_is_redacted():
+    assert redact_query("/oauth/consent?request=abc123") == "/oauth/consent?request=…"
+
+
+def test_authorization_code_is_redacted():
+    assert "code=…" in redact_query("/cb?code=secret&state=s")
+
+
+def test_keys_survive_only_values_go():
+    """По ключам видно, что за запрос был, — это нужно при разборе."""
+    out = redact_query("/authorize?response_type=code&client_id=x&state=sec")
+    assert "response_type=code" in out, "не-секретные параметры трогать не надо"
+    assert "client_id=x" in out
+    assert "state=…" in out
+    assert "sec" not in out
+
+
+def test_paths_without_query_are_untouched():
+    assert redact_query("/healthz") == "/healthz"
+    assert redact_query("/mcp") == "/mcp"
+
+
+def test_filter_rewrites_the_uvicorn_record():
+    """Путь лежит третьим аргументом — на этом держится вся вычистка."""
+    record = logging.LogRecord(
+        "uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d', None, None
+    )
+    record.args = ("1.2.3.4:5", "GET", "/oauth/consent?request=leak", "1.1", 200)
+    assert RedactAccessLog().filter(record) is True
+    assert record.args[2] == "/oauth/consent?request=…"
+    assert "leak" not in str(record.args)
+
+
+def test_filter_survives_unexpected_args():
+    """Формат uvicorn может поменяться — падать из-за логгера непозволительно."""
+    record = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, "%s", None, None)
+    record.args = ("just one",)
+    assert RedactAccessLog().filter(record) is True

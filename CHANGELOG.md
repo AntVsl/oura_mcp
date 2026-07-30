@@ -5,6 +5,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `skills/oura` — a Claude skill with four recipes: sleep trend, recovery check,
+  symptom investigation, and judging whether a change in routine did anything.
+  Workflows, not tools: a sequence of calls plus how to reason about the answer.
+  Borrowed from `YasuakiOmokawa/oura-mcp`, which ships nine of them; on top of
+  these tools the recipes come out shorter, since they need not explain
+  pagination or UTC conversion. Field names are checked against the code by
+  tests — the first run caught four that did not exist.
+- Access-log redaction. uvicorn logs full query strings, and the deployed
+  server's logs contained `GET /oauth/consent?request=…` — the one-time
+  authorization request secret. Keys are kept, values replaced.
+
 ## [0.2.3] — 2026-07-30
 
 ### Added

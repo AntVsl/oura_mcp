@@ -16,6 +16,7 @@ middleware из SDK, а общий секрет превращается в бе
 
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 
@@ -126,3 +127,64 @@ def build_app(mcp: FastMCP, host: str):
     app = mcp.streamable_http_app()
     token = resolve_token(host)
     return app if token is None else BearerAuthMiddleware(app, token)
+
+
+# --- вычистка секретов из журнала доступа -----------------------------------
+
+# Значения этих параметров в логах не нужны никому, а вреда от них хватает.
+# `request` — одноразовый идентификатор заявки на авторизацию, `code` —
+# authorization code, остальное говорит само за себя. Сам по себе ни один из
+# них не даёт доступа (нужен ещё OURA_MCP_TOKEN), но секретам место не в
+# журнале, который читают через docker logs и копируют в переписку.
+SENSITIVE_PARAMS = frozenset(
+    {
+        "request",
+        "code",
+        "state",
+        "code_challenge",
+        "code_verifier",
+        "access_token",
+        "refresh_token",
+        "token",
+        "client_secret",
+        "authorization",
+    }
+)
+
+
+def redact_query(path: str) -> str:
+    """Заменяет значения чувствительных параметров на `…`.
+
+    Ключи остаются: по ним видно, что за запрос был, и это полезно при разборе.
+    Пропадают только значения — ровно то, ради чего вычистка и делается.
+    """
+    head, sep, query = path.partition("?")
+    if not sep:
+        return path
+    parts = []
+    for chunk in query.split("&"):
+        key, eq, _ = chunk.partition("=")
+        if eq and key.lower() in SENSITIVE_PARAMS:
+            parts.append(f"{key}=…")
+        else:
+            parts.append(chunk)
+    return f"{head}?{'&'.join(parts)}"
+
+
+class RedactAccessLog(logging.Filter):
+    """Чистит журнал доступа uvicorn.
+
+    Фильтром, а не своим логгером: uvicorn собирает строку сам, и перехватывать
+    её на уровне записи дешевле, чем отключать его access-log и городить свой.
+    Путь лежит третьим аргументом записи — так устроен формат uvicorn.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str):
+            record.args = (*args[:2], redact_query(args[2]), *args[3:])
+        return True
+
+
+def install_access_log_redaction() -> None:
+    logging.getLogger("uvicorn.access").addFilter(RedactAccessLog())

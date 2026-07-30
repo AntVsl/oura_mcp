@@ -62,9 +62,7 @@
     },
     {
       "registryType": "oci",
-      "registryBaseUrl": "https://docker.io",
-      "identifier": "iican/oura-mcp",
-      "version": "0.2.3",
+      "identifier": "docker.io/iican/oura-mcp:0.2.3",
       "transport": {
         "type": "streamable-http",
         "url": "http://localhost:8000/mcp"
