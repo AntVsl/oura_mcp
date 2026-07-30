@@ -5,6 +5,17 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Publishing to the MCP registry now happens in the release workflow over GitHub
+  OIDC, alongside PyPI and Docker Hub. The interactive `login github` issues a
+  token that expires in under an hour, which in practice meant a race between
+  logging in and publishing — three device codes were burned in one session
+  while working through the registry's schema rejections. The job runs last and
+  depends on both publish jobs, since the registry verifies the artifacts already
+  exist and carry their ownership proofs, and it waits for PyPI to actually serve
+  the new version — that took up to two minutes in practice.
+
 ## [0.3.0] — 2026-07-30
 
 ### Added
