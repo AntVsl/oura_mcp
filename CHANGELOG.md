@@ -5,6 +5,16 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `my-oura-mcp install` prints ready-to-paste configuration for Claude Code,
+  Claude Desktop and Cursor, with the absolute path already filled in — the
+  relative-path mistake it prevents was common enough to have its own entry in
+  the troubleshooting section. It deliberately **writes nothing**: the
+  neighbouring `YasuakiOmokawa/oura-mcp` merges itself into those config files,
+  but a bad merge breaks servers that belong to someone else, and the file
+  formats drift per app version and OS.
+
 ### Changed
 
 - Publishing to the MCP registry now happens in the release workflow over GitHub

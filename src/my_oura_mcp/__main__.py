@@ -5,6 +5,7 @@
     my-oura-mcp auth                 # разовая авторизация в Oura
     my-oura-mcp auth --status        # состояние токенов
     my-oura-mcp auth --logout        # забыть токены
+    my-oura-mcp install              # готовые настройки для клиентов
 """
 
 from __future__ import annotations
@@ -37,6 +38,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if argv and argv[0] == "auth":
         return _auth(settings, argv[1:])
+    if argv and argv[0] == "install":
+        from . import install
+        from .config import project_root
+
+        return install.run(settings, project_root())
     return _serve(settings, argv)
 
 

@@ -272,8 +272,8 @@ returns fails `uv run pytest` instead of quietly sending the model nowhere.
 ## When something doesn't work
 
 **Claude says there are no Oura tools.** The server didn't connect. `claude mcp
-list` shows its state. A common cause is a relative path in `claude mcp add`
-where a full one is required.
+list` shows its state. A common cause is a relative path where a full one is
+required — `uv run my-oura-mcp install` prints the command with the right one.
 
 **"Авторизация не пройдена — токенов нет".** The server is in `production` mode
 but has never signed in to Oura. Run `uv run my-oura-mcp auth`; check token state
