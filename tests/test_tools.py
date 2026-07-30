@@ -85,9 +85,12 @@ async def test_explicit_dates_take_precedence_over_days_back():
         "get_sleep_score",
         {"days_back": 14, "start_date": "2026-07-01", "end_date": "2026-07-10"},
     )
+    # Окно уходит расширенным на сутки в каждую сторону — Oura фильтрует по
+    # метке в UTC, а не по полю day, и узкий запрос молча теряет края.
+    # Лишнее отсекается на нашей стороне, наружу выходит ровно запрошенное.
     params = route.calls[0].request.url.params
-    assert params["start_date"] == "2026-07-01"
-    assert params["end_date"] == "2026-07-10"
+    assert params["start_date"] == "2026-06-30"
+    assert params["end_date"] == "2026-07-11"
 
 
 @respx.mock
@@ -97,8 +100,9 @@ async def test_no_arguments_falls_back_to_tool_default():
     )
     await call("get_sleep_score", {})
     params = route.calls[0].request.url.params
-    start = date.fromisoformat(params["start_date"])
-    end = date.fromisoformat(params["end_date"])
+    # Минус расширение по сутки с каждой стороны.
+    start = date.fromisoformat(params["start_date"]) + timedelta(days=1)
+    end = date.fromisoformat(params["end_date"]) - timedelta(days=1)
     assert (end - start).days == 6, "по умолчанию 7 дней — это сегодня плюс 6"
 
 
@@ -122,8 +126,9 @@ async def test_tags_default_is_thirty_days():
     )
     await call("get_tags", {})
     params = route.calls[0].request.url.params
-    start = date.fromisoformat(params["start_date"])
-    end = date.fromisoformat(params["end_date"])
+    # Минус расширение по сутки с каждой стороны.
+    start = date.fromisoformat(params["start_date"]) + timedelta(days=1)
+    end = date.fromisoformat(params["end_date"]) - timedelta(days=1)
     assert (end - start).days == 29, "get_tags по умолчанию — 30 дней"
 
 

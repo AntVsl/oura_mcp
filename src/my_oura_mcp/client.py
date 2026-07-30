@@ -23,19 +23,30 @@ from .dates import to_datetime_bounds, today
 # Эндпоинты, принимающие start_datetime/end_datetime вместо start_date/end_date.
 DATETIME_ENDPOINTS = frozenset({"heartrate"})
 
-# Эндпоинты, которые Oura фильтрует по внутренней метке времени в UTC, а не по
-# полю day, которое сама же возвращает. В поясе +03 запись «за сегодня» уезжает
-# в предыдущие сутки UTC и в окно не попадает: запрос 28..28 отдаёт пусто, хотя
-# запись с day=28 существует и видна в 27..28.
+# Oura фильтрует выдачу по внутренней метке времени в UTC, а не по полю day,
+# которое сама же возвращает. В поясе +03 запись «за сегодня» уезжает в
+# предыдущие сутки UTC и в узкое окно не попадает: запрос 29..29 отдаёт пусто,
+# хотя запись с day=29 существует и видна в 28..30.
 #
-# Проверено перебором на реальных данных: sleep и daily_activity теряют записи
-# в 8 случаях из 8, остальные эндпоинты (daily_sleep, daily_readiness,
-# daily_spo2, daily_stress, daily_resilience, daily_cardiovascular_age)
-# отвечают одинаково на узкое и расширенное окно.
+# Раньше здесь стоял список «сломанных» эндпоинтов из двух имён, а про
+# остальные было записано, что они отвечают одинаково на узкое и широкое окно.
+# Это оказалось неверно. Перебор по семи дням подряд:
 #
-# Лечим расширением окна с последующей фильтрацией по day на нашей стороне.
-UTC_WINDOW_FILTERED = frozenset({"sleep", "daily_activity"})
+#   daily_sleep       теряет 7 из 7      daily_stress      теряет 7 из 7
+#   daily_readiness   теряет 7 из 7      daily_resilience  теряет 7 из 7
+#   daily_spo2        теряет 7 из 7
+#
+# Поэтому логика перевёрнута: окно расширяется ДЛЯ ВСЕХ, а исключением стало
+# то, что нельзя подрезать. Новый эндпоинт получает защиту по умолчанию, а не
+# ждёт, пока кто-то заметит пропажу.
 UTC_WINDOW_PAD_DAYS = 1
+
+# У enhanced_tag поля day нет вовсе: метка датируется парой start_day/end_day и
+# может охватывать несколько суток. Подрезать её по day значило бы выкосить всё,
+# поэтому для неё своё правило — пересечение промежутка метки с окном запроса.
+# Метка, начавшаяся до окна и продолжающаяся внутрь него, должна попасть в
+# ответ: она про эти сутки тоже.
+SPAN_ENDPOINTS = frozenset({"enhanced_tag"})
 
 # Какой скоуп нужен эндпоинту — чтобы 403 объяснял себя сам.
 ENDPOINT_SCOPES = {
@@ -65,9 +76,28 @@ class OuraError(RuntimeError):
     """Ошибка обращения к Oura, пригодная для показа человеку и модели."""
 
 
-def _trim_to_days(rows: list[dict[str, Any]], start: date, end: date) -> list[dict[str, Any]]:
-    """Отбрасывает записи, попавшие только из-за расширения окна."""
+def _trim_to_days(
+    rows: list[dict[str, Any]], start: date, end: date, endpoint: str = ""
+) -> list[dict[str, Any]]:
+    """Отбрасывает записи, попавшие только из-за расширения окна.
+
+    Расширение всегда парное: запросили шире, отдали ровно запрошенное.
+    """
     lo, hi = start.isoformat(), end.isoformat()
+
+    if endpoint in SPAN_ENDPOINTS:
+        # Метка занимает промежуток. Оставляем те, что его пересекают: начатая
+        # вчера и продолжающаяся сегодня относится и к сегодняшним суткам.
+        kept = []
+        for r in rows:
+            begins = r.get("start_day")
+            if not isinstance(begins, str):
+                continue
+            finishes = r.get("end_day") if isinstance(r.get("end_day"), str) else begins
+            if begins <= hi and finishes >= lo:
+                kept.append(r)
+        return kept
+
     return [r for r in rows if r.get("day") and lo <= r["day"] <= hi]
 
 
@@ -157,7 +187,9 @@ class OuraClient:
         end: date,
         extra_params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        pad = UTC_WINDOW_PAD_DAYS if endpoint in UTC_WINDOW_FILTERED else 0
+        # Расширяем всем, кроме тех, кто ходит по меткам времени: подрезка
+        # вернёт ровно запрошенное окно.
+        pad = 0 if endpoint in DATETIME_ENDPOINTS else UTC_WINDOW_PAD_DAYS
 
         if endpoint in DATETIME_ENDPOINTS:
             lo, hi = to_datetime_bounds(start, end, self._settings.tz)
@@ -179,7 +211,7 @@ class OuraClient:
             rows.extend(payload.get("data") or [])
             nxt = payload.get("next_token")
             if not nxt or nxt in seen_tokens:
-                return _trim_to_days(rows, start, end) if pad else rows
+                return _trim_to_days(rows, start, end, endpoint) if pad else rows
             seen_tokens.add(nxt)
             params = {**params, "next_token": nxt}
 

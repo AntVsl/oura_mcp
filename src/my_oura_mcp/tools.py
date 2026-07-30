@@ -17,6 +17,8 @@ days_back объявлен как int | None = None, а не int = 7: некот
 
 from __future__ import annotations
 
+import functools
+from datetime import timedelta
 from typing import Any
 
 import httpx
@@ -26,7 +28,7 @@ from . import shaping
 from .cache import DayCache
 from .client import TokenProvider, OuraClient, OuraError, TIMEOUT
 from .config import Settings
-from .dates import DateRangeError, resolve_range
+from .dates import DateRangeError, resolve_range, today
 
 
 def register(
@@ -250,3 +252,83 @@ def register(
                 else "Режим production: возвращаются твои реальные данные."
             ),
         }
+
+    # --- ресурсы ---------------------------------------------------------------
+    #
+    # Ресурс отличается от инструмента тем, что клиент может подтянуть его в
+    # контекст сам, не решая, какую функцию позвать и с какими аргументами. Для
+    # «как я сегодня» это естественнее вызова с параметрами.
+    #
+    # Цена: клиент вправе читать ресурсы часто, и каждое чтение — запросы к
+    # Oura. Поэтому ресурсы появились после кэша, а не до: вчерашний день и
+    # неделя после первого чтения берутся из базы. Сегодняшний не кэшируется
+    # никогда, так что `oura://today` всегда живой — это осознанная плата за
+    # свежесть там, где она нужна больше всего.
+    #
+    # Разбора дат на естественном языке здесь намеренно нет. Модель и так
+    # переводит «за прошлую неделю» в аргументы инструмента — для того она и
+    # стоит между человеком и сервером.
+
+    async def _summary(days_back: int, start: str | None = None) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for name, endpoint in (
+            ("sleep", "daily_sleep"),
+            ("readiness", "daily_readiness"),
+            ("activity", "daily_activity"),
+        ):
+            out[name] = await serve(
+                endpoint, days_back, start, start, raw=False, default_days=days_back
+            )
+        return out
+
+    def _safe(fn):
+        """Ошибка ресурса не должна ломать загрузку контекста.
+
+        Инструмент возвращает ошибку в ответ на явный вызов — её видно и
+        понятно, откуда она. Ресурс читается фоном, и исключение здесь
+        превращается в сломанный контекст без объяснения причин.
+
+        `functools.wraps` здесь не косметика: FastMCP читает сигнатуру функции,
+        чтобы сопоставить её с параметрами URI, и без `__wrapped__` увидел бы
+        `*args, **kwargs` вместо пустого списка — регистрация падает.
+        """
+
+        @functools.wraps(fn)
+        async def wrapped() -> dict[str, Any]:
+            try:
+                return await fn()
+            except Exception as exc:  # noqa: BLE001 — ресурс обязан вернуть хоть что-то
+                return {"error": str(exc), "hint": "подробности — через инструменты"}
+
+        return wrapped
+
+    @mcp.resource(
+        "oura://today",
+        name="Oura сегодня",
+        description="Сон, готовность и активность за сегодня. Всегда свежее: текущие сутки не кэшируются.",
+        mime_type="application/json",
+    )
+    @_safe
+    async def resource_today() -> dict[str, Any]:
+        return await _summary(days_back=1)
+
+    @mcp.resource(
+        "oura://yesterday",
+        name="Oura вчера",
+        description="То же за вчера — полная ночь, в отличие от сегодняшних неполных суток.",
+        mime_type="application/json",
+    )
+    @_safe
+    async def resource_yesterday() -> dict[str, Any]:
+        day = (today(settings.tz) - timedelta(days=1)).isoformat()
+        return await _summary(days_back=1, start=day)
+
+    @mcp.resource(
+        "oura://week",
+        name="Oura за неделю",
+        description="Семь дней со статистикой и трендом — контекст, без которого одно число мало что значит.",
+        mime_type="application/json",
+    )
+    @_safe
+    async def resource_week() -> dict[str, Any]:
+        return await _summary(days_back=7)

@@ -181,8 +181,12 @@ async def test_only_missing_days_are_requested(tmp_path):
         client = OuraClient(settings(tmp_path), lambda: _token(), http=http, cache=cache)
         got = await client.fetch("daily_sleep", date(2026, 7, 20), date(2026, 7, 21))
 
+    # Запрошенное окно — только недостающий день. В сеть оно уходит расширенным
+    # на сутки в каждую сторону (Oura теряет края узкого окна), поэтому
+    # сравниваем с поправкой на это расширение.
     asked = route.calls[0].request.url.params
-    assert asked["start_date"] == "2026-07-21", "закэшированный день перезапрашивать незачем"
+    assert asked["start_date"] == "2026-07-20", "07-21 минус сутки расширения"
+    assert asked["end_date"] == "2026-07-22", "07-21 плюс сутки расширения"
     assert [r["day"] for r in got] == ["2026-07-20", "2026-07-21"]
 
 
@@ -190,12 +194,16 @@ async def test_only_missing_days_are_requested(tmp_path):
 async def test_refetched_day_does_not_double(tmp_path):
     """Свежие сутки заменяют закэшированные, а не складываются с ними."""
     cache = DayCache(tmp_path / "c.db", "production")
-    cache.store("daily_sleep", [row("2026-07-20", 50), row("2026-07-22")], TODAY)
+    # В кэше только середина: недостающие края дадут запрос 20..22, и
+    # закэшированный 21-й окажется внутри — вот где день мог бы удвоиться.
+    cache.store("daily_sleep", [row("2026-07-21", 50)], TODAY)
 
-    # Дырка посередине: запросим 21..21, но Oura вернёт и соседей.
     respx.get(url__regex=r".*daily_sleep.*").mock(
         return_value=httpx.Response(
-            200, json={"data": [row("2026-07-20", 99), row("2026-07-21")]}
+            200,
+            json={
+                "data": [row("2026-07-20"), row("2026-07-21", 99), row("2026-07-22")]
+            },
         )
     )
     async with httpx.AsyncClient() as http:
@@ -204,8 +212,8 @@ async def test_refetched_day_does_not_double(tmp_path):
 
     days = [r["day"] for r in got]
     assert days == sorted(days), "ответ должен остаться упорядоченным по дням"
-    assert days.count("2026-07-20") == 1, "день не должен удвоиться"
-    assert [r for r in got if r["day"] == "2026-07-20"][0]["score"] == 99, "свежее важнее"
+    assert days.count("2026-07-21") == 1, "день не должен удвоиться"
+    assert [r for r in got if r["day"] == "2026-07-21"][0]["score"] == 99, "свежее важнее"
 
 
 @respx.mock

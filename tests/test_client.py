@@ -43,8 +43,12 @@ async def test_follows_pagination():
 @respx.mock
 async def test_repeated_next_token_does_not_loop():
     """Если API вернёт тот же токен, клиент обязан остановиться, а не зациклиться."""
+    # День настоящий и внутри запрошенного окна: иначе подрезка отбросит
+    # записи, и тест про зацикливание провалится по совсем другой причине.
     respx.get(f"{SANDBOX_BASE}/daily_sleep").mock(
-        return_value=httpx.Response(200, json={"data": [{"day": "x"}], "next_token": "same"})
+        return_value=httpx.Response(
+            200, json={"data": [{"day": START.isoformat()}], "next_token": "same"}
+        )
     )
     rows = await fetch()
     assert len(rows) == 2
@@ -134,16 +138,52 @@ async def test_sleep_trims_rows_pulled_in_by_padding():
 
 
 @respx.mock
-async def test_daily_endpoints_are_not_padded():
-    """Расширение нужно только sleep — daily_* фильтруют по day корректно."""
+async def test_daily_endpoints_are_padded_too():
+    """Расширение нужно и daily_*: этот тест раньше утверждал обратное.
+
+    Прежнее предположение — «daily_* фильтруют по day корректно» — не выдержало
+    проверки на живых данных: перебором по семи дням подряд daily_readiness
+    терял запись 7 раз из 7, и то же для daily_sleep, daily_spo2, daily_stress,
+    daily_resilience. Узкое окно молча отдавало пусто.
+    """
     route = respx.get(f"{SANDBOX_BASE}/daily_readiness").mock(
         return_value=httpx.Response(200, json={"data": []})
     )
     async with OuraClient(settings()) as client:
         await client.fetch("daily_readiness", date(2026, 7, 28), date(2026, 7, 28))
     params = route.calls[0].request.url.params
-    assert params["start_date"] == "2026-07-28"
-    assert params["end_date"] == "2026-07-28"
+    assert params["start_date"] == "2026-07-27"
+    assert params["end_date"] == "2026-07-29"
+
+
+@respx.mock
+async def test_enhanced_tag_trims_by_its_own_span():
+    """У метки нет поля day — она датируется парой start_day/end_day.
+
+    Окно ей расширяется наравне со всеми: узкий запрос теряет метки так же,
+    как терял записи daily_*. Подрезка идёт по пересечению промежутка.
+    """
+    route = respx.get(f"{SANDBOX_BASE}/enhanced_tag").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"id": "внутри", "start_day": "2026-07-28", "end_day": None},
+                    {"id": "тянется внутрь", "start_day": "2026-07-26", "end_day": "2026-07-29"},
+                    {"id": "мимо", "start_day": "2026-07-25", "end_day": "2026-07-26"},
+                ]
+            },
+        )
+    )
+    async with OuraClient(settings()) as client:
+        rows = await client.fetch("enhanced_tag", date(2026, 7, 28), date(2026, 7, 28))
+
+    params = route.calls[0].request.url.params
+    assert params["start_date"] == "2026-07-27", "расширяется как и все остальные"
+    assert params["end_date"] == "2026-07-29"
+
+    ids = {r["id"] for r in rows}
+    assert ids == {"внутри", "тянется внутрь"}, "метка через окно относится и к этим суткам"
 
 
 @respx.mock
@@ -165,3 +205,58 @@ async def test_production_without_token_provider_explains_itself():
 
 async def _no_sleep(*args):  # подменяет staticmethod — приходит лишний self
     return None
+
+
+# --- расширение окна по умолчанию -------------------------------------------
+#
+# Логика перевёрнута сознательно: раньше расширялись два эндпоинта из списка
+# «сломанных», а про остальные было записано, что они работают правильно. Это
+# оказалось неверно — daily_sleep, daily_readiness, daily_spo2, daily_stress и
+# daily_resilience теряли записи 7 раз из 7. Теперь расширяются все, и новый
+# эндпоинт получает защиту по умолчанию, не дожидаясь, пока кто-то заметит
+# пропажу.
+
+
+@respx.mock
+async def test_unknown_endpoint_is_padded_by_default():
+    """Главное свойство новой схемы: защита достаётся даром."""
+    route = respx.get(f"{SANDBOX_BASE}/some_future_endpoint").mock(
+        return_value=httpx.Response(200, json={"data": []})
+    )
+    async with OuraClient(settings()) as client:
+        await client.fetch("some_future_endpoint", date(2026, 7, 28), date(2026, 7, 28))
+    params = route.calls[0].request.url.params
+    assert params["start_date"] == "2026-07-27"
+    assert params["end_date"] == "2026-07-29"
+
+
+@respx.mock
+async def test_padding_is_invisible_from_outside():
+    """Запросили шире, отдали ровно запрошенное — иначе соседние дни утекут."""
+    respx.get(f"{SANDBOX_BASE}/daily_sleep").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"day": "2026-07-27", "score": 1},
+                    {"day": "2026-07-28", "score": 2},
+                    {"day": "2026-07-29", "score": 3},
+                ]
+            },
+        )
+    )
+    async with OuraClient(settings()) as client:
+        rows = await client.fetch("daily_sleep", date(2026, 7, 28), date(2026, 7, 28))
+    assert [r["day"] for r in rows] == ["2026-07-28"]
+
+
+@respx.mock
+async def test_heartrate_is_not_padded():
+    """Он ходит по меткам времени, а не по дням: расширять нечего."""
+    route = respx.get(f"{SANDBOX_BASE}/heartrate").mock(
+        return_value=httpx.Response(200, json={"data": []})
+    )
+    async with OuraClient(settings()) as client:
+        await client.fetch("heartrate", date(2026, 7, 28), date(2026, 7, 28))
+    params = route.calls[0].request.url.params
+    assert params["start_datetime"].startswith("2026-07-28")

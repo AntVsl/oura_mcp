@@ -5,6 +5,26 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Five endpoints silently lost data on narrow date windows.** Oura filters by
+  an internal UTC timestamp rather than the `day` field it returns, so a
+  single-day query came back empty while the same day appeared in a wider one.
+  The code carried a comment stating these endpoints had been checked and were
+  unaffected; a sweep over seven consecutive days showed `daily_sleep`,
+  `daily_readiness`, `daily_spo2`, `daily_stress` and `daily_resilience` each
+  losing the record 7 times out of 7. `enhanced_tag` lost tags the same way and
+  needed its own rule, since it is dated by a `start_day`/`end_day` span rather
+  than a `day`.
+
+  The window is now widened for every endpoint and trimmed locally, instead of
+  only for a two-name allowlist of "known broken" ones — a list protects only
+  what someone remembered to add to it. Verified across fourteen endpoints:
+  zero losses.
+
+  Found by the new `oura://yesterday` resource returning an empty period on its
+  first read.
+
 ### Added
 
 - **SQLite cache for completed days.** Past days in Oura are immutable, so they
