@@ -283,6 +283,16 @@ and matches the connector URL character for character, including `https://` and
 no trailing slash. The startup banner says whether OAuth came up. Beyond that,
 see [docs/DEPLOY.md](docs/DEPLOY.md).
 
+**You press Allow on the consent page and nothing happens.** Check the server
+logs: a `POST /oauth/consent` returning `303` with no `POST /token` after it
+means the browser blocked the hop back to claude.ai. That is what an over-strict
+`Content-Security-Policy` looks like — and `curl` cannot reproduce it, since it
+does not enforce CSP at all.
+
+**"Запрос устарел" / request expired.** Authorization requests live in process
+memory, so restarting the server invalidates any consent page already open. The
+secret is not the problem — go back to claude.ai and start the connection again.
+
 ## Development
 
 ```bash

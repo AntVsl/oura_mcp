@@ -36,6 +36,7 @@ import secrets
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from mcp.server.auth.provider import (
     AccessToken,
@@ -66,6 +67,14 @@ PENDING_TTL_SEC = 600
 # оставляло бы в хранилище запись навсегда. Три месяца — с запасом больше
 # любого разумного простоя телефона, так что переспрашивать секрет не придётся.
 REFRESH_TTL_SEC = 90 * 24 * 3600
+
+# Исходы согласия. Их три, а не два, потому что «протухла заявка» и «неверный
+# секрет» требуют разных действий от человека: в первом случае надо начать
+# подключение заново в claude.ai, во втором — ввести правильный секрет. Одно
+# сообщение на оба случая отправляло владельца искать несуществующую ошибку.
+GRANT_OK = "ok"
+GRANT_BAD_SECRET = "bad_secret"
+GRANT_STALE = "stale"
 
 
 class OAuthStore:
@@ -159,9 +168,16 @@ class OuraAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refre
     Согласие даётся вводом `OURA_MCP_TOKEN` на странице /oauth/consent.
     """
 
-    def __init__(self, store: OAuthStore, owner_secret: str, consent_path: str = "/oauth/consent") -> None:
+    def __init__(
+        self,
+        store: OAuthStore,
+        owner_secret: str,
+        issuer: str,
+        consent_path: str = "/oauth/consent",
+    ) -> None:
         self._store = store
         self._owner_secret = owner_secret
+        self._issuer = issuer
         self._consent_path = consent_path
         # Заявки на авторизацию живут минуты и переживать перезапуск не должны:
         # незавершённое согласие после рестарта честнее начать заново.
@@ -196,21 +212,48 @@ class OuraAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refre
         self._pending[request_id] = (client.client_id, params, time.time() + PENDING_TTL_SEC)
         return f"{self._consent_path}?request={request_id}"
 
-    def grant(self, request_id: str, presented_secret: str) -> str | None:
-        """Проверяет секрет и выдаёт код. Возвращает URL редиректа или None.
+    def redirect_origin(self, request_id: str) -> str | None:
+        """Origin, куда уйдёт браузер после согласия, — или None если заявки нет.
 
-        None означает «не пущен» — без уточнения, что именно не так. Разделять
-        «нет такой заявки» и «неверный секрет» в ответе не стоит: это
-        подсказка тому, кто подбирает.
+        Нужен странице согласия для заголовка CSP. `form-action` проверяется
+        браузером на всей цепочке редиректов, а не только на адресе самой
+        формы: со значением `'self'` ответ 303 на claude.ai блокируется молча,
+        и человек видит, что кнопка «не работает». Поэтому конкретный адрес
+        возврата приходится объявить заранее.
+
+        Origin, а не полный URL: в CSP путь всё равно не учитывается.
         """
         self._sweep()
         entry = self._pending.get(request_id)
         if entry is None:
             return None
+        parsed = urlsplit(str(entry[1].redirect_uri))
+        return f"{parsed.scheme}://{parsed.netloc}"
+
+    def grant(self, request_id: str, presented_secret: str) -> tuple[str | None, str]:
+        """Проверяет секрет и выдаёт код.
+
+        Возвращает `(url_редиректа, причина)`. Причины различаются намеренно, и
+        это исправление: раньше «заявка протухла» и «неверный секрет» давали
+        одно и то же сообщение, чтобы не подсказывать подбирающему. Рассуждение
+        не выдержало проверки практикой — владелец получал «проверь секрет»
+        после перезапуска сервера и искал ошибку там, где её не было.
+
+        Утечки здесь нет: `request_id` сам по себе секрет на 24 случайных
+        байта, и тот, у кого он на руках, и так знает, что заявка живая.
+        Про сам `OURA_MCP_TOKEN` наружу по-прежнему не сообщается ничего, кроме
+        «подошёл или нет».
+        """
+        self._sweep()
+        entry = self._pending.get(request_id)
+        if entry is None:
+            # Чаще всего это не атака, а перезапуск сервера: заявки живут в
+            # памяти процесса, и рестарт их стирает вместе с открытой вкладкой.
+            return None, GRANT_STALE
 
         # Постоянное время: обычное сравнение выдаёт длину общего префикса.
         if not secrets.compare_digest(presented_secret, self._owner_secret):
-            return None
+            return None, GRANT_BAD_SECRET
 
         client_id, params, _ = self._pending.pop(request_id)
         code = secrets.token_urlsafe(32)  # 256 бит, вчетверо выше требуемого RFC 6749
@@ -225,7 +268,17 @@ class OuraAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refre
             resource=params.resource,
             subject="owner",
         )
-        return construct_redirect_uri(str(params.redirect_uri), code=code, state=params.state)
+        # iss — обязательный параметр по RFC 9207 (защита от mix-up атак: без
+        # него клиент, работающий с несколькими серверами авторизации, не
+        # может убедиться, что редирект пришёл от того же issuer, который был
+        # заявлен в метаданных, и вправе молча отбросить callback). Строка
+        # берётся из server.py посимвольно совпадающей с полем "issuer" в
+        # /.well-known/oauth-authorization-server — иначе проверка всё равно
+        # провалится, просто по другой причине.
+        redirect = construct_redirect_uri(
+            str(params.redirect_uri), code=code, state=params.state, iss=self._issuer
+        )
+        return redirect, GRANT_OK
 
     def _sweep(self) -> None:
         """Выбрасывает протухшие заявки и коды.
@@ -403,6 +456,31 @@ CONSENT_HTML = """<!doctype html>
 
 ERROR_BLOCK = '<p class="err">Не подошло. Проверь секрет и попробуй ещё раз.</p>'
 
+# Отдельная страница для протухшей заявки: формы на ней нет намеренно. Вводить
+# секрет заново бессмысленно — этот request_id мёртв, и повторная отправка даст
+# ровно тот же ответ. Единственный работающий выход — начать заново в claude.ai.
+STALE_HTML = """<!doctype html>
+<html lang="ru"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Запрос устарел</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+         margin: 0; display: grid; place-items: center; min-height: 100dvh; padding: 1.5rem; }
+  main { width: min(23rem, 100%); }
+  h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
+  p { margin: 0 0 1rem; opacity: .75; }
+</style></head>
+<body><main>
+<h1>Запрос устарел</h1>
+<p>Эта страница уже использована или сервер перезапускался — с секретом всё в
+порядке, проверять его не нужно.</p>
+<p>Вернись в claude.ai и нажми «Connect» у коннектора Oura ещё раз.</p>
+</main></body></html>
+"""
+
 
 # Заголовки страницы согласия. Каждый закрывает свою дыру, а вместе они делают
 # внедрение неисполнимым даже если экранирование однажды прохлопают.
@@ -415,20 +493,42 @@ ERROR_BLOCK = '<p class="err">Не подошло. Проверь секрет �
 #                        поверх формы кладут прозрачный слой и ловят ввод)
 #   no-store             в кэш и историю страница с полем секрета не попадает
 #   no-referrer          идентификатор заявки не утечёт в Referer
-CONSENT_HEADERS = {
-    "Cache-Control": "no-store",
-    "Content-Security-Policy": (
-        "default-src 'none'; style-src 'unsafe-inline'; "
-        "form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
-    ),
-    # Дубль frame-ancestors для браузеров, которые его не знают.
-    "X-Frame-Options": "DENY",
-    "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
-}
+def consent_headers(redirect_origin: str | None = None) -> dict[str, str]:
+    """Заголовки страницы согласия.
+
+    `form-action` перечисляет и свой origin, и адрес возврата клиента. Второе
+    обязательно, и это стоило одного сбоя вживую: браузер применяет
+    `form-action` **ко всей цепочке редиректов**, а не только к адресу, куда
+    уходит сама форма. С одним лишь `'self'` наш ответ `303` на claude.ai
+    блокировался молча — кнопка «Разрешить» выглядела сломанной, claude.ai не
+    получал callback, и `/token` не вызывался ни разу. Curl этого не ловит:
+    он CSP не проверяет.
+
+    Origin берётся из заявки, а не зашивается: сюда ходит не только claude.ai,
+    и разрешать всё подряд значило бы выкинуть саму защиту, ради которой
+    директива стоит — не дать увести форму с секретом на чужой хост.
+    """
+    form_action = "'self'" if redirect_origin is None else f"'self' {redirect_origin}"
+    return {
+        "Cache-Control": "no-store",
+        "Content-Security-Policy": (
+            "default-src 'none'; style-src 'unsafe-inline'; "
+            f"form-action {form_action}; frame-ancestors 'none'; base-uri 'none'"
+        ),
+        # Дубль frame-ancestors для браузеров, которые его не знают.
+        "X-Frame-Options": "DENY",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+    }
 
 
-def _consent_page(request_id: str, error: bool = False) -> HTMLResponse:
+# Для страниц без формы (протухшая заявка) адрес возврата не нужен.
+CONSENT_HEADERS = consent_headers()
+
+
+def _consent_page(
+    request_id: str, error: bool = False, redirect_origin: str | None = None
+) -> HTMLResponse:
     """Страница согласия с экранированным идентификатором заявки.
 
     Экранирование здесь обязательно и неочевидно: `request_id` приходит из
@@ -442,7 +542,7 @@ def _consent_page(request_id: str, error: bool = False) -> HTMLResponse:
             error=ERROR_BLOCK if error else "",
         ),
         status_code=401 if error else 200,
-        headers=CONSENT_HEADERS,
+        headers=consent_headers(redirect_origin),
     )
 
 
@@ -456,15 +556,24 @@ def register_consent_route(mcp, provider: OuraAuthProvider, path: str = "/oauth/
     @mcp.custom_route(path, methods=["GET", "POST"])
     async def consent(request: Request):
         if request.method == "GET":
-            # Несуществующую заявку показываем той же формой, без пояснений:
-            # разница в ответах подсказывала бы, какие идентификаторы живые.
-            return _consent_page(request.query_params.get("request", ""))
+            request_id = request.query_params.get("request", "")
+            return _consent_page(
+                request_id, redirect_origin=provider.redirect_origin(request_id)
+            )
 
         form = await request.form()
         request_id = str(form.get("request", ""))
-        redirect = provider.grant(request_id, str(form.get("password", "")))
+        # Origin читаем ДО grant(): успешный grant заявку снимает.
+        origin = provider.redirect_origin(request_id)
+        redirect, reason = provider.grant(request_id, str(form.get("password", "")))
+        if reason == GRANT_STALE:
+            # Форму не показываем: этот request_id мёртв, и повторный ввод
+            # секрета ничего не изменит. Раньше здесь была та же форма с
+            # «проверь секрет», и это отправляло владельца искать ошибку в
+            # правильном секрете.
+            return HTMLResponse(STALE_HTML, status_code=410, headers=CONSENT_HEADERS)
         if redirect is None:
-            return _consent_page(request_id, error=True)
+            return _consent_page(request_id, error=True, redirect_origin=origin)
         # 303: после POST браузер обязан пойти GET'ом, иначе повторная отправка
         # формы по «назад» уткнётся в уже потраченную заявку.
         return RedirectResponse(redirect, status_code=303)

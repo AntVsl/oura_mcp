@@ -35,12 +35,7 @@ def build(
 
         from .oauth_server import OAuthStore, OuraAuthProvider, register_consent_route
 
-        provider = OuraAuthProvider(
-            OAuthStore(settings.token_store.with_name("oauth.json")),
-            owner_secret,
-        )
-        fastmcp_kwargs["auth_server_provider"] = provider
-        fastmcp_kwargs["auth"] = AuthSettings(
+        auth_settings = AuthSettings(
             issuer_url=settings.public_url,
             resource_server_url=settings.resource_url,
             # DCR обязателен: Claude регистрируется сам, вписать client_id
@@ -51,6 +46,17 @@ def build(
             # у статического токена скоупов нет.
             required_scopes=None,
         )
+        provider = OuraAuthProvider(
+            OAuthStore(settings.token_store.with_name("oauth.json")),
+            owner_secret,
+            # Ровно та же строка, что уйдёт в метаданные полем "issuer":
+            # pydantic нормализует URL (добавляет хвостовой слэш), и RFC 9207
+            # требует посимвольного совпадения "iss" в редиректе с "issuer" в
+            # метаданных — не совпадёт, если взять исходный settings.public_url.
+            issuer=str(auth_settings.issuer_url),
+        )
+        fastmcp_kwargs["auth_server_provider"] = provider
+        fastmcp_kwargs["auth"] = auth_settings
         mcp = FastMCP("oura", **fastmcp_kwargs)
         register_consent_route(mcp, provider)
     else:

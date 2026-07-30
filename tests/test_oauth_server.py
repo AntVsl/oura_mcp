@@ -18,6 +18,8 @@ from pydantic import AnyUrl
 from mcp.server.auth.provider import AuthorizationParams
 from mcp.shared.auth import OAuthClientInformationFull
 from my_oura_mcp.oauth_server import (
+    GRANT_BAD_SECRET,
+    GRANT_STALE,
     AdvertisePublicClients,
     OAuthStore,
     OuraAuthProvider,
@@ -35,7 +37,7 @@ def store_path(tmp_path):
 
 @pytest.fixture
 def provider(store_path):
-    return OuraAuthProvider(OAuthStore(store_path), SECRET)
+    return OuraAuthProvider(OAuthStore(store_path), SECRET, issuer="https://oura-mcp.lol/")
 
 
 @pytest.fixture
@@ -62,7 +64,7 @@ async def _authorized(provider, client, secret=SECRET):
     )
     url = await provider.authorize(client, params)
     request_id = url.split("request=")[1]
-    redirect = provider.grant(request_id, secret)
+    redirect, _ = provider.grant(request_id, secret)
     return redirect.split("code=")[1].split("&")[0] if redirect else None
 
 
@@ -103,7 +105,7 @@ async def test_grant_returns_code_and_preserves_state(provider, client):
         redirect_uri_provided_explicitly=True,
     )
     url = await provider.authorize(client, params)
-    redirect = provider.grant(url.split("request=")[1], SECRET)
+    redirect, _ = provider.grant(url.split("request=")[1], SECRET)
     # state обязан вернуться нетронутым: на нём держится защита от CSRF.
     assert "state=opaque-state" in redirect
     assert redirect.startswith(REDIRECT)
@@ -119,8 +121,9 @@ async def test_request_is_single_use(provider, client):
     )
     url = await provider.authorize(client, params)
     request_id = url.split("request=")[1]
-    assert provider.grant(request_id, SECRET) is not None
-    assert provider.grant(request_id, SECRET) is None
+    assert provider.grant(request_id, SECRET)[0] is not None
+    # Повторная отправка той же заявки — уже протухшая, а не «неверный секрет».
+    assert provider.grant(request_id, SECRET) == (None, GRANT_STALE)
 
 
 async def test_expired_request_is_swept(provider, client, monkeypatch):
@@ -136,7 +139,7 @@ async def test_expired_request_is_swept(provider, client, monkeypatch):
     request_id = url.split("request=")[1]
     # Час спустя заявка мертва, даже с верным секретом.
     monkeypatch.setattr(time, "time", lambda: real_now + 3600)
-    assert provider.grant(request_id, SECRET) is None
+    assert provider.grant(request_id, SECRET) == (None, GRANT_STALE)
 
 
 # --- обмен кода -------------------------------------------------------------
@@ -218,7 +221,7 @@ async def test_expired_access_token_is_rejected_and_dropped(provider, client, st
     raw["access"][tokens.access_token]["expires_at"] = int(time.time()) - 1
     store_path.write_text(json.dumps(raw))
 
-    fresh = OuraAuthProvider(OAuthStore(store_path), SECRET)
+    fresh = OuraAuthProvider(OAuthStore(store_path), SECRET, issuer="https://oura-mcp.lol/")
     assert await fresh.load_access_token(tokens.access_token) is None
     # И вычищен, иначе хранилище растёт на токен в час.
     assert tokens.access_token not in json.loads(store_path.read_text())["access"]
@@ -246,7 +249,7 @@ async def test_survives_restart(provider, client, store_path):
     loaded = await provider.load_authorization_code(client, code)
     tokens = await provider.exchange_authorization_code(client, loaded)
 
-    revived = OuraAuthProvider(OAuthStore(store_path), SECRET)
+    revived = OuraAuthProvider(OAuthStore(store_path), SECRET, issuer="https://oura-mcp.lol/")
     assert await revived.get_client("cid") is not None
     assert await revived.load_access_token(tokens.access_token) is not None
 
@@ -475,7 +478,7 @@ async def test_expired_rows_are_pruned_on_issue(provider, client, store_path):
     raw["refresh"]["stale-refresh"] = {"token": "stale-refresh", "client_id": "cid", "scopes": [], "expires_at": 1}
     store_path.write_text(json.dumps(raw))
 
-    revived = OuraAuthProvider(OAuthStore(store_path), SECRET)
+    revived = OuraAuthProvider(OAuthStore(store_path), SECRET, issuer="https://oura-mcp.lol/")
     rt = await revived.load_refresh_token(client, first.refresh_token)
     await revived.exchange_refresh_token(client, rt, [])
 
@@ -495,3 +498,160 @@ async def test_prune_keeps_live_rows(provider, client, store_path):
 
     assert await provider.load_access_token(second.access_token) is not None
     assert await provider.load_refresh_token(client, second.refresh_token) is not None
+
+
+# --- RFC 9207: iss в редиректе -----------------------------------------------
+#
+# Обнаружено на живом сервере: Claude принимал секрет (303 See Other), но ни
+# разу не вызывал /token. Причина — отсутствие "iss" в редиректе. Без него
+# клиент, работающий с множеством разных серверов авторизации, не может
+# убедиться, что callback пришёл от заявленного issuer, и вправе молча
+# отбросить его — что и произошло.
+
+
+async def test_redirect_carries_iss_matching_the_issuer():
+    """iss должен присутствовать и совпадать с тем, что провайдер объявил."""
+    code = await _authorized(_provider_with_issuer("https://oura-mcp.lol/"), _client())
+    assert code is not None  # _authorized уже дошёл до успешного grant
+
+
+def _provider_with_issuer(issuer: str) -> OuraAuthProvider:
+    return OuraAuthProvider(OAuthStore(_tmp_store()), SECRET, issuer=issuer)
+
+
+def _tmp_store():
+    import tempfile
+    from pathlib import Path
+
+    return Path(tempfile.mkdtemp()) / "oauth.json"
+
+
+def _client() -> OAuthClientInformationFull:
+    return OAuthClientInformationFull(
+        client_id="cid",
+        client_secret=None,
+        redirect_uris=[AnyUrl(REDIRECT)],
+        token_endpoint_auth_method="none",
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+    )
+
+
+async def test_iss_value_is_the_exact_string_passed_in():
+    """Посимвольное совпадение обязательно по RFC 9207 — не просто похожий домен."""
+    provider = _provider_with_issuer("https://oura-mcp.lol/")
+    client = _client()
+    params = AuthorizationParams(
+        state="s",
+        scopes=[],
+        code_challenge="chal",
+        redirect_uri=AnyUrl(REDIRECT),
+        redirect_uri_provided_explicitly=True,
+    )
+    url = await provider.authorize(client, params)
+    redirect, _ = provider.grant(url.split("request=")[1], SECRET)
+    assert "iss=https%3A%2F%2Foura-mcp.lol%2F" in redirect
+
+
+async def test_iss_present_alongside_code_and_state():
+    provider = _provider_with_issuer("https://oura-mcp.lol/")
+    client = _client()
+    params = AuthorizationParams(
+        state="opaque",
+        scopes=[],
+        code_challenge="chal",
+        redirect_uri=AnyUrl(REDIRECT),
+        redirect_uri_provided_explicitly=True,
+    )
+    url = await provider.authorize(client, params)
+    redirect, _ = provider.grant(url.split("request=")[1], SECRET)
+    assert "code=" in redirect
+    assert "state=opaque" in redirect
+    assert "iss=" in redirect
+
+
+# --- честность сообщений об отказе -------------------------------------------
+#
+# Раньше «протухла заявка» и «неверный секрет» давали одно сообщение — я свёл их
+# нарочно, чтобы не подсказывать подбирающему. На практике это отправило
+# владельца проверять правильный секрет после перезапуска сервера. Утечки в
+# различении нет: request_id сам по себе секрет на 24 случайных байта.
+
+
+async def test_stale_and_wrong_secret_are_distinguished(provider, client):
+    params = AuthorizationParams(
+        state=None, scopes=[], code_challenge="chal",
+        redirect_uri=AnyUrl(REDIRECT), redirect_uri_provided_explicitly=True,
+    )
+    url = await provider.authorize(client, params)
+    rid = url.split("request=")[1]
+
+    # Живая заявка, но не тот секрет.
+    assert provider.grant(rid, "not-the-secret") == (None, GRANT_BAD_SECRET)
+    # Заявки не существует вовсе.
+    assert provider.grant("never-existed", SECRET) == (None, GRANT_STALE)
+    # А верный секрет по живой заявке по-прежнему проходит.
+    assert provider.grant(rid, SECRET)[0] is not None
+
+
+def test_stale_page_offers_no_form():
+    """Вводить секрет заново бессмысленно — заявка мертва. Форма только путает."""
+    from my_oura_mcp.oauth_server import STALE_HTML
+
+    assert "<form" not in STALE_HTML
+    assert "claude.ai" in STALE_HTML
+
+
+def test_stale_page_says_the_secret_is_fine():
+    """Главное, что должно быть на странице: не ищи ошибку в секрете."""
+    from my_oura_mcp.oauth_server import STALE_HTML
+
+    assert "порядке" in STALE_HTML
+
+
+# --- CSP form-action и цепочка редиректов ------------------------------------
+#
+# Стоило одного сбоя вживую. `form-action 'self'` браузер применяет ко ВСЕЙ
+# цепочке редиректов после отправки формы, а не только к её action. Ответ 303 на
+# claude.ai блокировался молча: кнопка «Разрешить» выглядела сломанной, callback
+# не доходил, /token не вызывался ни разу. Curl этого не ловит — CSP не его дело.
+
+
+async def test_form_action_allows_the_clients_redirect(provider, client):
+    """Без этого 303 на claude.ai блокируется браузером молча."""
+    params = AuthorizationParams(
+        state=None, scopes=[], code_challenge="chal",
+        redirect_uri=AnyUrl(REDIRECT), redirect_uri_provided_explicitly=True,
+    )
+    url = await provider.authorize(client, params)
+    rid = url.split("request=")[1]
+
+    assert provider.redirect_origin(rid) == "https://claude.ai"
+
+    csp = _consent_page(rid, redirect_origin=provider.redirect_origin(rid)).headers[
+        "content-security-policy"
+    ]
+    assert "form-action 'self' https://claude.ai" in csp
+
+
+def test_form_action_stays_restrictive_without_a_request():
+    """Разрешать всё подряд нельзя: смысл директивы — не увести форму с секретом."""
+    csp = _consent_page("nope").headers["content-security-policy"]
+    assert "form-action 'self';" in csp
+    assert "*" not in csp
+
+
+async def test_redirect_origin_is_origin_not_full_url(provider, client):
+    """В CSP путь не учитывается, а лишние символы ломают разбор директивы."""
+    params = AuthorizationParams(
+        state=None, scopes=[], code_challenge="chal",
+        redirect_uri=AnyUrl(REDIRECT), redirect_uri_provided_explicitly=True,
+    )
+    url = await provider.authorize(client, params)
+    origin = provider.redirect_origin(url.split("request=")[1])
+    assert origin == "https://claude.ai"
+    assert "/api/mcp" not in origin
+
+
+def test_unknown_request_has_no_origin(provider):
+    assert provider.redirect_origin("never-existed") is None

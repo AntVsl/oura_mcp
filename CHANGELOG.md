@@ -5,6 +5,48 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-07-30
+
+First release verified against claude.ai end to end, on desktop and on a phone.
+Three separate defects stood between a working server and a working connection,
+and all three failed silently — no error in the logs, no message a user could act
+on.
+
+### Fixed
+
+- **`form-action 'self'` blocked the redirect back to claude.ai.** Added in 0.2.1
+  to stop the consent form being redirected to a foreign host, the directive is
+  enforced by browsers across the *entire redirect chain* that follows a form
+  submission — not just the form's own action. So the `303` to
+  `https://claude.ai/…` was blocked silently: the "Разрешить" button looked
+  broken, claude.ai never received the callback, and `/token` was never called.
+  Three rounds of `curl` verification passed and could not have caught this —
+  `curl` does not enforce CSP. `form-action` now names the client's registered
+  redirect origin, taken from the pending request rather than hardcoded, so the
+  protection stays meaningful.
+- **claude.ai never called `/token`.** Live traffic on the deployed server showed
+  the consent step succeeding (`303 See Other` with a fresh code) but no token
+  exchange ever following it — confirmed by grepping the entire log history for
+  `POST /token`: zero hits, across two full connection attempts. The redirect was
+  missing `iss` (RFC 9207, the authorization-server-issuer parameter that guards
+  against mix-up attacks when a client talks to many different authorization
+  servers, which is exactly Claude's situation). Without it a strict client can
+  discard the callback before ever reaching the token endpoint — apparently
+  without surfacing an error a user could act on. The value must match the
+  `issuer` field in `/.well-known/oauth-authorization-server` character for
+  character; it now does, taken from the same normalized string. Verified end to
+  end against a running server: register, authorize, consent, and `POST /token`
+  now all complete with an access and refresh token returned.
+- **A stale authorization request claimed the secret was wrong.** "Request
+  expired" and "wrong secret" shared one message, on the reasoning that
+  distinguishing them would help someone guessing. It doesn't: the request id is
+  itself 24 random bytes, so anyone holding a live one already knows it is live.
+  What it did do was send the owner to check a secret that was correct all along
+  — the requests live in process memory, so any server restart invalidates an
+  open consent page. A stale request now answers `410` with a page that says the
+  secret is fine and points back to claude.ai, and offers no form, because
+  retyping the secret cannot help.
+
 ## [0.2.1] — 2026-07-30
 
 ### Fixed
@@ -105,7 +147,8 @@ Five defects that all shared one trait — data disappeared with no error raised
   an explicit argument, breaking every request that also carried explicit
   dates.
 
-[Unreleased]: https://github.com/AntVsl/oura_mcp/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/AntVsl/oura_mcp/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/AntVsl/oura_mcp/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/AntVsl/oura_mcp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/AntVsl/oura_mcp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/AntVsl/oura_mcp/releases/tag/v0.1.0
