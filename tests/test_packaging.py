@@ -53,3 +53,34 @@ def test_changelog_has_an_entry_for_this_version():
     """Выпускать версию без записи в CHANGELOG — терять историю решений."""
     changelog = (ROOT / "CHANGELOG.md").read_text()
     assert f"## [{declared_version()}]" in changelog
+
+
+def test_registry_description_fits_the_limit():
+    """Реестр MCP отвергает описание длиннее 100 символов.
+
+    Ошибка вылезает только при `mcp-publisher validate`, то есть в момент
+    публикации, — а туда доходишь редко и обычно в спешке.
+    """
+    manifest = json.loads((ROOT / "server.json").read_text())
+    assert len(manifest["description"]) <= 100, (
+        f"{len(manifest['description'])} символов, реестр примет не больше 100"
+    )
+
+
+def test_readme_proves_pypi_ownership():
+    """Реестр MCP требует токен `mcp-name:` в README пакета PyPI.
+
+    Без него публикация падает с 400 — но уже ПОСЛЕ того, как версия ушла в
+    PyPI и образ выложен, а значит чинится только новым релизом. Проверять
+    заранее дешевле.
+    """
+    manifest = json.loads((ROOT / "server.json").read_text())
+    readme = (ROOT / "README.md").read_text()
+    assert f"mcp-name: {manifest['name']}" in readme
+
+
+def test_release_workflow_labels_the_image_for_the_registry():
+    """То же доказательство для образа — метка OCI, иначе публикация падает."""
+    manifest = json.loads((ROOT / "server.json").read_text())
+    workflow = (ROOT / ".github/workflows/release.yml").read_text()
+    assert f"io.modelcontextprotocol.server.name={manifest['name']}" in workflow

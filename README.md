@@ -320,3 +320,12 @@ deliberately deferred.
 ## License
 
 MIT
+
+<!--
+Ownership proof for the MCP registry: this token ties the PyPI package to the
+server name in server.json, and the registry refuses to publish without it.
+Kept in a comment because it is machine-facing, not something a reader needs.
+Do not edit by hand — tests/test_packaging.py checks it against server.json.
+
+mcp-name: io.github.AntVsl/oura-mcp
+-->

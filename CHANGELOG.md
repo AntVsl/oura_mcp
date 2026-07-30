@@ -5,6 +5,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-07-30
+
+### Added
+
+- Ownership proofs required to publish in the MCP registry: the `mcp-name:` token
+  in the README that ties the PyPI package to the server name, and the
+  `io.modelcontextprotocol.server.name` label on the Docker image. Both are
+  checked by tests, because the registry only rejects a publish *after* the
+  version has already shipped to PyPI and Docker Hub — so the fix costs a whole
+  release.
+- The registry also caps `description` at 100 characters, which is likewise only
+  discovered at publish time. Shortened, and covered by a test.
+
 ## [0.2.2] — 2026-07-30
 
 First release verified against claude.ai end to end, on desktop and on a phone.
@@ -147,7 +160,8 @@ Five defects that all shared one trait — data disappeared with no error raised
   an explicit argument, breaking every request that also carried explicit
   dates.
 
-[Unreleased]: https://github.com/AntVsl/oura_mcp/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/AntVsl/oura_mcp/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/AntVsl/oura_mcp/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/AntVsl/oura_mcp/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/AntVsl/oura_mcp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/AntVsl/oura_mcp/compare/v0.1.0...v0.2.0

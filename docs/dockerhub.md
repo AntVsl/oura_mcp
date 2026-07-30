@@ -13,7 +13,7 @@ compact summary back, not a wall of JSON.
 | Tag | Meaning |
 |---|---|
 | `latest` | Most recent release |
-| `0.2`, `0.2.2` | Pinned versions |
+| `0.2`, `0.2.3` | Pinned versions |
 
 Built for `linux/amd64` and `linux/arm64`.
 
@@ -31,7 +31,7 @@ docker run -d \
   -e OURA_PUBLIC_URL=https://mcp.example.com \
   -v oura-data:/data \
   -p 8000:8000 \
-  iican/oura-mcp:0.2.2
+  iican/oura-mcp:0.2.3
 ```
 
 Then point a client at `https://your-host/mcp`. Claude Code authenticates with

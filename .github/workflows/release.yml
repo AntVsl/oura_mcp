@@ -79,6 +79,11 @@ jobs:
             org.opencontainers.image.description=MCP server for Oura Ring data: sleep, readiness, HRV, resting heart rate
             org.opencontainers.image.documentation=https://github.com/AntVsl/oura_mcp#readme
             org.opencontainers.image.licenses=MIT
+            # Доказательство владения образом для реестра MCP: значение должно
+            # совпадать с полем "name" в server.json. Без метки публикация
+            # отвергается с 400, причём уже после того, как образ собран и
+            # выложен, — то есть чинится только новым релизом.
+            io.modelcontextprotocol.server.name=io.github.AntVsl/oura-mcp
 
       - name: Build and push
         uses: docker/build-push-action@v6
