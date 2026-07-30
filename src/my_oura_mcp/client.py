@@ -16,8 +16,9 @@ from typing import Any
 
 import httpx
 
+from .cache import DayCache, days_between
 from .config import Settings
-from .dates import to_datetime_bounds
+from .dates import to_datetime_bounds, today
 
 # Эндпоинты, принимающие start_datetime/end_datetime вместо start_date/end_date.
 DATETIME_ENDPOINTS = frozenset({"heartrate"})
@@ -76,11 +77,13 @@ class OuraClient:
         settings: Settings,
         token_provider: TokenProvider | None = None,
         http: httpx.AsyncClient | None = None,
+        cache: DayCache | None = None,
     ) -> None:
         self._settings = settings
         self._token_provider = token_provider
         self._http = http
         self._owns_http = http is None
+        self._cache = cache
 
     async def __aenter__(self) -> OuraClient:
         if self._http is None:
@@ -110,7 +113,50 @@ class OuraClient:
         end: date,
         extra_params: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """Все записи эндпоинта за диапазон, со всех страниц."""
+        """Все записи эндпоинта за диапазон, со всех страниц.
+
+        При наличии кэша завершённые сутки берутся из него, а в сеть уходит
+        только недостающий отрезок.
+        """
+        if self._cache is not None and not extra_params and endpoint not in DATETIME_ENDPOINTS:
+            return await self._fetch_cached(endpoint, start, end)
+        return await self._fetch_remote(endpoint, start, end, extra_params)
+
+    async def _fetch_cached(
+        self, endpoint: str, start: date, end: date
+    ) -> list[dict[str, Any]]:
+        assert self._cache is not None
+        cached = self._cache.lookup(endpoint, start, end)
+        missing = [d for d in days_between(start, end) if d.isoformat() not in cached]
+
+        if not missing:
+            # Ни одного обращения к сети: весь диапазон уже лежит в базе.
+            return [row for day in sorted(cached) for row in cached[day]]
+
+        # Запрашиваем одним отрезком от первого недостающего дня до последнего.
+        # Дырка посередине приведёт к перезапросу уже известных суток — это
+        # дешевле, чем дробить диапазон на куски и слать несколько запросов.
+        fresh = await self._fetch_remote(endpoint, min(missing), max(missing), None)
+        self._cache.store(endpoint, fresh, today(self._settings.tz))
+
+        fresh_by_day: dict[str, list[dict[str, Any]]] = {}
+        for row in fresh:
+            day = row.get("day")
+            if isinstance(day, str) and start.isoformat() <= day <= end.isoformat():
+                fresh_by_day.setdefault(day, []).append(row)
+
+        # Свежие сутки заменяют закэшированные целиком, а не дополняются к ним:
+        # перезапрошенный день иначе удвоился бы в ответе.
+        merged = {**cached, **fresh_by_day}
+        return [row for day in sorted(merged) for row in merged[day]]
+
+    async def _fetch_remote(
+        self,
+        endpoint: str,
+        start: date,
+        end: date,
+        extra_params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         pad = UTC_WINDOW_PAD_DAYS if endpoint in UTC_WINDOW_FILTERED else 0
 
         if endpoint in DATETIME_ENDPOINTS:

@@ -23,6 +23,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 from . import shaping
+from .cache import DayCache
 from .client import TokenProvider, OuraClient, OuraError, TIMEOUT
 from .config import Settings
 from .dates import DateRangeError, resolve_range
@@ -32,6 +33,9 @@ def register(
     mcp: FastMCP, settings: Settings, token_provider: TokenProvider | None = None
 ) -> None:
     http: httpx.AsyncClient | None = None
+    # Один экземпляр на всё время работы сервера: подключение к SQLite дешёвое,
+    # а вот пересоздавать объект на каждый вызов инструмента незачем.
+    cache = DayCache(settings.cache_db, settings.mode) if settings.cache_db else None
 
     async def fetch(
         endpoint: str,
@@ -46,7 +50,7 @@ def register(
         if days_back is None and start_date is None and end_date is None:
             days_back = default_days
         start, end = resolve_range(settings.tz, days_back, start_date, end_date)
-        client = OuraClient(settings, token_provider, http=http)
+        client = OuraClient(settings, token_provider, http=http, cache=cache)
         return await client.fetch(endpoint, start, end)
 
     async def serve(

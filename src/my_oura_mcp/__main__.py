@@ -6,6 +6,8 @@
     my-oura-mcp auth --status        # состояние токенов
     my-oura-mcp auth --logout        # забыть токены
     my-oura-mcp install              # готовые настройки для клиентов
+    my-oura-mcp cache --status       # что лежит в кэше
+    my-oura-mcp cache --clear        # забыть закэшированное
 """
 
 from __future__ import annotations
@@ -38,6 +40,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if argv and argv[0] == "auth":
         return _auth(settings, argv[1:])
+    if argv and argv[0] == "cache":
+        return _cache(settings, argv[1:])
     if argv and argv[0] == "install":
         from . import install
         from .config import project_root
@@ -75,6 +79,45 @@ def _auth(settings: Settings, argv: list[str]) -> int:
     except (AuthError, ConfigError) as exc:
         print(f"Авторизация не удалась: {exc}", file=sys.stderr)
         return 1
+    return 0
+
+
+# --- кэш --------------------------------------------------------------------
+
+
+def _cache(settings: Settings, argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="my-oura-mcp cache")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--status", action="store_true", help="что закэшировано")
+    group.add_argument("--clear", action="store_true", help="забыть закэшированное")
+    parser.add_argument("--endpoint", help="только один эндпоинт, вместе с --clear")
+    args = parser.parse_args(argv)
+
+    if settings.cache_db is None:
+        print("Кэш выключен: OURA_CACHE_DB пуст.", file=sys.stderr)
+        return 0
+
+    from .cache import DayCache
+
+    cache = DayCache(settings.cache_db, settings.mode)
+
+    if args.clear:
+        removed = cache.clear(args.endpoint)
+        where = f" для {args.endpoint}" if args.endpoint else ""
+        print(f"Забыто дней{where}: {removed}")
+        return 0
+
+    stats = cache.stats()
+    if not stats.get("available"):
+        print(f"Кэш недоступен: {stats['path']}", file=sys.stderr)
+        return 1
+    print(f"  файл:   {stats['path']}")
+    print(f"  режим:  {stats['mode']}")
+    print(f"  дней:   {stats['days']}")
+    if stats["range"]:
+        print(f"  период: {stats['range'][0]} .. {stats['range'][1]}")
+    for endpoint, n in (stats["by_endpoint"] or {}).items():
+        print(f"    {endpoint}: {n}")
     return 0
 
 

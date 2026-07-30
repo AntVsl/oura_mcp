@@ -35,7 +35,7 @@ class Settings:
     client_secret: str | None
     redirect_uri: str
     token_store: Path
-    cache_db: Path
+    cache_db: Path | None
     # Публичный адрес сервера, если он развёрнут наружу: включает OAuth для
     # claude.ai. Без него сервер работает как раньше — на общем секрете.
     public_url: str | None = None
@@ -117,6 +117,9 @@ def load_settings(env_file: Path | None = None) -> Settings:
             "OURA_REDIRECT_URI", "http://localhost:8765/callback"
         ).strip(),
         token_store=_path("OURA_TOKEN_STORE", ".oura/tokens.json"),
-        cache_db=_path("OURA_CACHE_DB", ".oura/cache.db"),
+        # Пустое значение — осознанный отказ от кэша, а не «не задано».
+        cache_db=None
+        if os.getenv("OURA_CACHE_DB", "").strip() == "" and "OURA_CACHE_DB" in os.environ
+        else _path("OURA_CACHE_DB", ".oura/cache.db"),
         public_url=public_url,
     )

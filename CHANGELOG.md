@@ -7,6 +7,18 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **SQLite cache for completed days.** Past days in Oura are immutable, so they
+  are stored once and never requested again: a repeated two-week query now sends
+  only today over the network, and a purely historical window makes no request at
+  all — verified against live data, 1.82 s down to 0.38 s. Today is never cached,
+  because Oura is still writing it, and the day boundary is taken in the
+  configured timezone rather than the system one. Empty days are not cached
+  either: an empty day means either "did not wear the ring" or "has not synced
+  yet", and caching the second would freeze a wrong answer forever. The API mode
+  is part of the key so sandbox data cannot surface in production, and any SQLite
+  failure degrades to "no cache" rather than breaking access to data.
+  Manage it with `my-oura-mcp cache --status` / `--clear`.
+
 - `my-oura-mcp install` prints ready-to-paste configuration for Claude Code,
   Claude Desktop and Cursor, with the absolute path already filled in — the
   relative-path mistake it prevents was common enough to have its own entry in

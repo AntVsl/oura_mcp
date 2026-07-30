@@ -150,7 +150,7 @@ Everything lives in `.env` (see `.env.example`). Secrets never reach git.
 | `OURA_MCP_TOKEN` | Shared secret guarding the HTTP endpoint; also the consent-page password |
 | `OURA_PUBLIC_URL` | Public `https` address. When set, enables OAuth for claude.ai |
 | `OURA_TOKEN_STORE` | Where the OAuth flow writes tokens. Not set by hand |
-| `OURA_CACHE_DB` | SQLite cache file |
+| `OURA_CACHE_DB` | SQLite cache file. An empty value disables caching |
 
 ## Running it
 
@@ -251,6 +251,25 @@ API yourself:
 - `/healthz` is intentionally open — a reverse proxy needs it, and it returns
   nothing but `ok`.
 - Caddy strips the `Authorization` header from its logs.
+
+## Caching
+
+Past days in Oura are immutable, so they go into SQLite and are never requested
+again. Asking for the same fortnight twice sends only today over the network; a
+purely historical window makes no request at all.
+
+```bash
+uv run my-oura-mcp cache --status   # what is cached
+uv run my-oura-mcp cache --clear    # forget it
+```
+
+Three things worth knowing. **Today is never cached** — Oura is still writing
+it. **Empty days are not cached either**: an empty day means either "did not
+wear the ring" or "has not synced yet", and the second resolves itself within
+hours, whereas a cached blank would last forever. **The mode is part of the
+key**, so sandbox data cannot surface in production.
+
+Per-minute heart rate bypasses the cache: its rows carry no `day` field.
 
 ## Skill with recipes
 
