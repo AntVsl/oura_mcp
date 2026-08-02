@@ -32,7 +32,8 @@ jobs:
 
       - name: Run tests before publishing
         run: |
-          uv sync --extra dev
+          uv lock --check
+          uv sync --frozen --extra dev
           uv run pytest -q
 
       - name: Build

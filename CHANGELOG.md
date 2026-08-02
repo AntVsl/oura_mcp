@@ -5,6 +5,31 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-08-02
+
+### Added
+
+- Cross-client agent support: `AGENTS.md`, task/review workflow templates, and
+  a Codex-ready `oura-mcp-maintenance` skill. The existing Oura insight skill
+  now explicitly supports Claude, Codex, and other MCP-capable agents.
+- `py.typed` marker and MCP resources coverage in the package test suite.
+
+### Fixed
+
+- Revalidate the two latest completed Oura days instead of serving stale cache
+  data after a late sync; cache and token-store files are owner-readable only.
+- Bound transient OAuth registrations, pending consent requests, and failed
+  consent attempts to prevent unbounded state growth.
+- Close per-request HTTP clients, report the actual authorization state, and
+  fetch independent daily summaries concurrently.
+- Pin reproducible Docker and CI dependency resolution to the committed lockfile.
+
+### Changed
+
+- Public OAuth accepts the explicit trusted origins for Claude.ai and ChatGPT;
+  setup instructions and the installer now cover Claude Code, Claude.ai, Codex,
+  and ChatGPT.
+
 ## [0.4.0] — 2026-07-30
 
 ### Fixed
@@ -230,7 +255,8 @@ Five defects that all shared one trait — data disappeared with no error raised
   an explicit argument, breaking every request that also carried explicit
   dates.
 
-[Unreleased]: https://github.com/AntVsl/oura_mcp/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/AntVsl/oura_mcp/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/AntVsl/oura_mcp/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/AntVsl/oura_mcp/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/AntVsl/oura_mcp/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/AntVsl/oura_mcp/compare/v0.2.2...v0.2.3

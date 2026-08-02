@@ -52,6 +52,11 @@ def _compact(d: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in d.items() if v is not None}
 
 
+def _by_day(rows: list[Row]) -> list[Row]:
+    """Стабильный хронологический порядок независимо от порядка API."""
+    return sorted(rows, key=lambda row: str(row.get("day") or ""))
+
+
 def describe(values: list[float]) -> dict[str, Any]:
     """Статистика по ряду: среднее, разброс, направление тренда."""
     clean = [v for v in values if v is not None]
@@ -102,7 +107,7 @@ def _envelope(
 
 def daily_sleep(rows: list[Row]) -> dict[str, Any]:
     daily = [
-        _compact({"day": r.get("day"), "score": _num(r, "score")}) for r in rows
+        _compact({"day": r.get("day"), "score": _num(r, "score")}) for r in _by_day(rows)
     ]
     return _envelope("sleep_score", daily, {"score": [d.get("score") for d in daily]})
 
@@ -118,7 +123,7 @@ def daily_readiness(rows: list[Row]) -> dict[str, Any]:
                 "resting_hr_score": _num(r, "contributors", "resting_heart_rate"),
             }
         )
-        for r in rows
+        for r in _by_day(rows)
     ]
     return _envelope(
         "readiness",
@@ -141,7 +146,7 @@ def daily_activity(rows: list[Row]) -> dict[str, Any]:
                 "total_kcal": _num(r, "total_calories"),
             }
         )
-        for r in rows
+        for r in _by_day(rows)
     ]
     return _envelope(
         "activity",
@@ -216,7 +221,7 @@ def sleep_detail(rows: list[Row]) -> dict[str, Any]:
                 "naps_h": _naps_hours(extras.get(r.get("day", ""), [])),
             }
         )
-        for r in rows
+        for r in _by_day(rows)
     ]
     keys = ("total_h", "deep_h", "rem_h", "efficiency", "avg_hrv", "avg_hr",
             "lowest_hr", "avg_breath")
@@ -240,7 +245,7 @@ def daily_spo2(rows: list[Row]) -> dict[str, Any]:
                 "breathing_disturbance_index": _num(r, "breathing_disturbance_index"),
             }
         )
-        for r in rows
+        for r in _by_day(rows)
     ]
     return _envelope(
         "spo2", daily, {"spo2_avg": [d.get("spo2_avg") for d in daily]}
@@ -265,7 +270,7 @@ def daily_stress(rows: list[Row]) -> dict[str, Any]:
                 "summary": r.get("day_summary"),
             }
         )
-        for r in rows
+        for r in _by_day(rows)
     ]
     return _envelope(
         "stress",
@@ -280,7 +285,7 @@ def daily_stress(rows: list[Row]) -> dict[str, Any]:
 def heart_health(rows: list[Row], metric: str) -> dict[str, Any]:
     """cardiovascular_age и vO2_max — поля различаются, берём что есть."""
     daily = []
-    for r in rows:
+    for r in _by_day(rows):
         value = (
             _num(r, "vascular_age")
             or _num(r, "vo2_max")
@@ -300,7 +305,7 @@ def tags(rows: list[Row]) -> dict[str, Any]:
                 "start_time": r.get("start_time"),
             }
         )
-        for r in rows
+        for r in _by_day(rows)
     ]
     return {"metric": "tags", "count": len(items), "items": items}
 

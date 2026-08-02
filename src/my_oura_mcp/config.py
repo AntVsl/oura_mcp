@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
@@ -39,6 +40,10 @@ class Settings:
     # Публичный адрес сервера, если он развёрнут наружу: включает OAuth для
     # claude.ai. Без него сервер работает как раньше — на общем секрете.
     public_url: str | None = None
+    # Разрешённые origins OAuth-клиентов для динамической регистрации.
+    oauth_allowed_redirect_origins: frozenset[str] = frozenset(
+        {"https://claude.ai", "https://chatgpt.com"}
+    )
 
     @property
     def oauth_enabled(self) -> bool:
@@ -72,12 +77,21 @@ class Settings:
         return self.client_id, self.client_secret
 
 
-def project_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+def project_root() -> Path | None:
+    """Корень checkout'а, если пакет запущен именно из него.
+
+    В установленном wheel ``__file__`` живёт в site-packages: подниматься от
+    него на два уровня и записывать туда .env/токены нельзя.
+    """
+    candidate = Path(__file__).resolve().parents[2]
+    return candidate if (candidate / "pyproject.toml").is_file() else None
 
 
 def load_settings(env_file: Path | None = None) -> Settings:
-    root = project_root()
+    # Конфигурация принадлежит месту запуска, а не месту установки пакета.
+    # В checkout это по-прежнему корень проекта, потому что команды из README
+    # запускаются после ``cd oura_mcp``.
+    root = (env_file.parent if env_file is not None else Path.cwd()).resolve()
     load_dotenv(env_file or root / ".env")
 
     mode = os.getenv("OURA_API_MODE", "sandbox").strip().lower()
@@ -108,6 +122,31 @@ def load_settings(env_file: Path | None = None) -> Settings:
             "Через http OAuth-коды и токены пошли бы открытым текстом."
         )
 
+    allowed_origins = frozenset(
+        part.strip().rstrip("/")
+        for part in (
+            os.getenv("OURA_OAUTH_ALLOWED_REDIRECT_ORIGINS")
+            or "https://claude.ai,https://chatgpt.com"
+        ).split(",")
+        if part.strip()
+    )
+
+    def _is_https_origin(origin: str) -> bool:
+        parsed = urlsplit(origin)
+        return (
+            parsed.scheme == "https"
+            and bool(parsed.netloc)
+            and not parsed.path
+            and not parsed.query
+            and not parsed.fragment
+        )
+
+    if not all(_is_https_origin(origin) for origin in allowed_origins):
+        raise ConfigError(
+            "OURA_OAUTH_ALLOWED_REDIRECT_ORIGINS должен содержать origins через запятую, "
+            "например https://claude.ai,https://chatgpt.com"
+        )
+
     return Settings(
         mode=mode,
         tz=tz,
@@ -122,4 +161,5 @@ def load_settings(env_file: Path | None = None) -> Settings:
         if os.getenv("OURA_CACHE_DB", "").strip() == "" and "OURA_CACHE_DB" in os.environ
         else _path("OURA_CACHE_DB", ".oura/cache.db"),
         public_url=public_url,
+        oauth_allowed_redirect_origins=allowed_origins,
     )

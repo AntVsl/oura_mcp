@@ -3,7 +3,7 @@
   "name": "io.github.AntVsl/oura-mcp",
   "title": "Oura Ring",
   "description": "Sleep, readiness, HRV, resting heart rate, activity and stress from your Oura Ring",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "websiteUrl": "https://github.com/AntVsl/oura_mcp#readme",
   "repository": {
     "url": "https://github.com/AntVsl/oura_mcp",
@@ -14,7 +14,7 @@
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "my-oura-mcp",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
@@ -23,13 +23,13 @@
         {
           "name": "OURA_CLIENT_ID",
           "description": "Client ID of your Oura application from developer.ouraring.com",
-          "isRequired": true,
+          "isRequired": false,
           "isSecret": false
         },
         {
           "name": "OURA_CLIENT_SECRET",
           "description": "Client secret of your Oura application",
-          "isRequired": true,
+          "isRequired": false,
           "isSecret": true
         },
         {
@@ -54,7 +54,13 @@
         },
         {
           "name": "OURA_PUBLIC_URL",
-          "description": "Public https address of this server, without a trailing slash. When set, the server runs its own OAuth 2.1 authorization server so claude.ai and the mobile apps can connect; leave empty for Claude Code, which authenticates with OURA_MCP_TOKEN",
+          "description": "Public https address, without a trailing slash. Enables OAuth 2.1 for Claude.ai and ChatGPT; leave empty for local or Bearer-token clients",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "OURA_OAUTH_ALLOWED_REDIRECT_ORIGINS",
+          "description": "Comma-separated trusted OAuth redirect origins; defaults to Claude.ai and ChatGPT",
           "isRequired": false,
           "isSecret": false
         }
@@ -62,7 +68,7 @@
     },
     {
       "registryType": "oci",
-      "identifier": "docker.io/iican/oura-mcp:0.4.0",
+      "identifier": "docker.io/iican/oura-mcp:0.4.1",
       "transport": {
         "type": "streamable-http",
         "url": "http://localhost:8000/mcp"
@@ -76,20 +82,26 @@
         },
         {
           "name": "OURA_PUBLIC_URL",
-          "description": "Public https address of this server, without a trailing slash. When set, the server runs its own OAuth 2.1 authorization server so claude.ai and the mobile apps can connect; leave empty for Claude Code, which authenticates with OURA_MCP_TOKEN",
+          "description": "Public https address, without a trailing slash. Enables OAuth 2.1 for Claude.ai and ChatGPT; leave empty for local or Bearer-token clients",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "OURA_OAUTH_ALLOWED_REDIRECT_ORIGINS",
+          "description": "Comma-separated trusted OAuth redirect origins; defaults to Claude.ai and ChatGPT",
           "isRequired": false,
           "isSecret": false
         },
         {
           "name": "OURA_CLIENT_ID",
           "description": "Client ID of your Oura application from developer.ouraring.com",
-          "isRequired": true,
+          "isRequired": false,
           "isSecret": false
         },
         {
           "name": "OURA_CLIENT_SECRET",
           "description": "Client secret of your Oura application",
-          "isRequired": true,
+          "isRequired": false,
           "isSecret": true
         },
         {

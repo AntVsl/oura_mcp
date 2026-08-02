@@ -27,6 +27,10 @@ def test_package_version_matches_pyproject():
     assert my_oura_mcp.__version__ == declared_version()
 
 
+def test_typed_package_has_pep_561_marker():
+    assert (ROOT / "src/my_oura_mcp/py.typed").is_file()
+
+
 def test_server_json_matches_pyproject():
     """server.json описывает сервер для реестра MCP и ссылается на артефакты.
 

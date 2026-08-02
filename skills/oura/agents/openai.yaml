@@ -1,0 +1,4 @@
+interface:
+  display_name: "Oura Insights"
+  short_description: "Interpret Oura MCP trends safely"
+  default_prompt: "Use $oura to interpret my Oura MCP data without making medical claims."

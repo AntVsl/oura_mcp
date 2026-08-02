@@ -123,3 +123,16 @@ def test_empty_public_url_means_disabled(monkeypatch):
     """Пустая переменная в .env — обычное дело, и она не должна включать OAuth."""
     monkeypatch.setenv("OURA_PUBLIC_URL", "   ")
     assert load_settings().oauth_enabled is False
+
+
+def test_claude_and_chatgpt_are_default_allowed_oauth_origins(monkeypatch):
+    monkeypatch.delenv("OURA_OAUTH_ALLOWED_REDIRECT_ORIGINS", raising=False)
+    assert load_settings().oauth_allowed_redirect_origins == frozenset(
+        {"https://claude.ai", "https://chatgpt.com"}
+    )
+
+
+def test_oauth_origin_must_not_contain_a_path(monkeypatch):
+    monkeypatch.setenv("OURA_OAUTH_ALLOWED_REDIRECT_ORIGINS", "https://claude.ai/callback")
+    with pytest.raises(ConfigError, match="origins"):
+        load_settings()

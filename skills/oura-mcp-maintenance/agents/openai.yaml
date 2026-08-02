@@ -1,0 +1,4 @@
+interface:
+  display_name: "Oura MCP Maintenance"
+  short_description: "Safely change the Oura MCP server"
+  default_prompt: "Use $oura-mcp-maintenance to safely implement and verify this Oura MCP change."

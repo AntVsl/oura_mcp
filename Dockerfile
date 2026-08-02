@@ -1,15 +1,16 @@
 # python:3.12-slim с Docker Hub, а не образ uv с ghcr.io — последний
 # недоступен из части сетей, и сборка на них молча падает.
-FROM python:3.12-slim
+FROM python:3.12.12-slim
 
-RUN pip install --no-cache-dir uv
+RUN pip install --no-cache-dir uv==0.11.32
 
 WORKDIR /app
 
 # Слой зависимостей отдельно от кода: правки в src не пересобирают окружение.
-COPY pyproject.toml README.md ./
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --no-dev --no-install-project
 COPY src/ ./src/
-RUN uv pip install --system --no-cache .
+RUN uv sync --frozen --no-dev --no-editable
 
 # Токены и кэш живут в томе, а не в образе.
 # Без -r: это не системная учётка, а обычная. С -r useradd ругается, что uid
@@ -23,6 +24,7 @@ USER oura
 # в томе /data и в образ не попадают.
 ENV OURA_TOKEN_STORE=/data/tokens.json \
     OURA_CACHE_DB=/data/cache.db \
+    PATH=/app/.venv/bin:$PATH \
     PYTHONUNBUFFERED=1
 
 EXPOSE 8000

@@ -143,13 +143,16 @@ def _serve(settings: Settings, argv: list[str]) -> int:
     # В production каждый запрос идёт с токеном, который сам обновляется по
     # истечении; в sandbox авторизация не нужна вовсе.
     provider = None
+    token_status = None
     if not settings.is_sandbox:
         try:
             settings.require_oauth()
         except ConfigError as exc:
             print(f"Ошибка конфигурации: {exc}", file=sys.stderr)
             return 2
-        provider = OuraOAuth(settings, TokenStore(settings.token_store)).access_token
+        oauth_client = OuraOAuth(settings, TokenStore(settings.token_store))
+        provider = oauth_client.access_token
+        token_status = oauth_client.status
         if not settings.token_store.exists():
             print(
                 f"Внимание: режим production, но токенов в {settings.token_store} нет. "
@@ -159,7 +162,7 @@ def _serve(settings: Settings, argv: list[str]) -> int:
 
     if args.transport == "stdio":
         _banner(settings, "stdio")
-        build(settings, provider).run(transport="stdio")
+        build(settings, provider, token_status).run(transport="stdio")
         return 0
 
     try:
@@ -184,6 +187,7 @@ def _serve(settings: Settings, argv: list[str]) -> int:
     mcp = build(
         settings,
         provider,
+        token_status,
         owner_secret=endpoint_token,
         host=args.host,
         port=args.port,

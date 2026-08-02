@@ -1,12 +1,13 @@
 ---
 name: oura
-description: Recipes for reading Oura Ring data through the my-oura-mcp server — sleep, readiness, HRV, resting heart rate, activity, stress. Use when the user asks how they slept, whether they are recovered, what a trend looks like, or wants to investigate how something affected their body.
+description: Recipes for reading Oura Ring data through the my-oura-mcp server — sleep, readiness, HRV, resting heart rate, activity, and stress. Use in Claude, Codex, or another MCP-capable agent when the user asks how they slept, whether they are recovered, what a trend looks like, or how a routine change affected their body.
 ---
 
 # Oura
 
-Workflows for `my-oura-mcp`. The server exposes eleven tools; this skill covers
-what to do with them beyond a single call.
+Client-neutral workflows for `my-oura-mcp`. The server exposes eleven tools;
+this skill covers what to do with them beyond a single call. Confirm that the
+MCP server is connected with `get_status` before relying on its data.
 
 ## What the tools already handle
 

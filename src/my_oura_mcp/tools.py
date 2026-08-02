@@ -17,26 +17,27 @@ days_back объявлен как int | None = None, а не int = 7: некот
 
 from __future__ import annotations
 
+import asyncio
 import functools
 from datetime import timedelta
+from collections.abc import Callable
 from typing import Any
 
-import httpx
 from mcp.server.fastmcp import FastMCP
 
 from . import shaping
 from .cache import DayCache
-from .client import TokenProvider, OuraClient, OuraError, TIMEOUT
+from .client import TokenProvider, OuraClient, OuraError
 from .config import Settings
 from .dates import DateRangeError, resolve_range, today
 
 
 def register(
-    mcp: FastMCP, settings: Settings, token_provider: TokenProvider | None = None
+    mcp: FastMCP,
+    settings: Settings,
+    token_provider: TokenProvider | None = None,
+    token_status: Callable[[], dict[str, object]] | None = None,
 ) -> None:
-    http: httpx.AsyncClient | None = None
-    # Один экземпляр на всё время работы сервера: подключение к SQLite дешёвое,
-    # а вот пересоздавать объект на каждый вызов инструмента незачем.
     cache = DayCache(settings.cache_db, settings.mode) if settings.cache_db else None
 
     async def fetch(
@@ -46,14 +47,14 @@ def register(
         end_date: str | None,
         default_days: int,
     ) -> list[dict[str, Any]]:
-        nonlocal http
-        if http is None:
-            http = httpx.AsyncClient(timeout=TIMEOUT)
         if days_back is None and start_date is None and end_date is None:
             days_back = default_days
         start, end = resolve_range(settings.tz, days_back, start_date, end_date)
-        client = OuraClient(settings, token_provider, http=http, cache=cache)
-        return await client.fetch(endpoint, start, end)
+        # Контекст гарантированно закрывает сокеты после вызова инструмента.
+        # FastMCP не предоставляет lifecycle объекта для этого замыкания, а
+        # долгоживущий httpx.AsyncClient здесь иначе оставался бы не закрыт.
+        async with OuraClient(settings, token_provider, cache=cache) as client:
+            return await client.fetch(endpoint, start, end)
 
     async def serve(
         endpoint: str,
@@ -89,14 +90,15 @@ def register(
         По умолчанию — последние 7 дней. Самый частый запрос — начинай с него,
         а за деталями иди в get_sleep и остальные инструменты.
         """
-        out: dict[str, Any] = {}
-        for name, endpoint in (
+        endpoints = (
             ("sleep", "daily_sleep"),
             ("readiness", "daily_readiness"),
             ("activity", "daily_activity"),
-        ):
-            out[name] = await serve(endpoint, days_back, start_date, end_date, raw)
-        return out
+        )
+        results = await asyncio.gather(
+            *(serve(endpoint, days_back, start_date, end_date, raw) for _, endpoint in endpoints)
+        )
+        return {name: result for (name, _), result in zip(endpoints, results, strict=True)}
 
     # --- сон ------------------------------------------------------------------
 
@@ -204,21 +206,25 @@ def register(
     ) -> dict[str, Any]:
         """Сосудистый возраст и VO2max. Обновляются редко, поэтому по умолчанию
         отдаются последние 30 дней."""
-        out: dict[str, Any] = {}
-        for name, endpoint in (
+        endpoints = (
             ("cardiovascular_age", "daily_cardiovascular_age"),
             ("vo2_max", "vO2_max"),
-        ):
-            out[name] = await serve(
-                endpoint,
-                days_back,
-                start_date,
-                end_date,
-                raw,
-                shaper=lambda rows, m=name: shaping.heart_health(rows, m),
-                default_days=30,
+        )
+        results = await asyncio.gather(
+            *(
+                serve(
+                    endpoint,
+                    days_back,
+                    start_date,
+                    end_date,
+                    raw,
+                    shaper=lambda rows, m=name: shaping.heart_health(rows, m),
+                    default_days=30,
+                )
+                for name, endpoint in endpoints
             )
-        return out
+        )
+        return {name: result for (name, _), result in zip(endpoints, results, strict=True)}
 
     # --- теги ------------------------------------------------------------------
 
@@ -240,11 +246,17 @@ def register(
     @mcp.tool()
     async def get_status() -> dict[str, Any]:
         """Режим работы сервера и состояние авторизации. Полезно при отладке."""
+        auth = token_status() if token_status is not None else {}
         return {
             "mode": settings.mode,
             "base_url": settings.base_url,
             "timezone": str(settings.tz),
-            "authorized": settings.is_sandbox or token_provider is not None,
+            "authorized": settings.is_sandbox or bool(auth.get("authorized")),
+            **(
+                {"token_status": auth}
+                if not settings.is_sandbox and token_status is not None
+                else {}
+            ),
             "note": (
                 "Режим sandbox: данные тестовые, не твои. "
                 "Переключи OURA_API_MODE=production в .env после OAuth."
@@ -270,16 +282,18 @@ def register(
     # стоит между человеком и сервером.
 
     async def _summary(days_back: int, start: str | None = None) -> dict[str, Any]:
-        out: dict[str, Any] = {}
-        for name, endpoint in (
+        endpoints = (
             ("sleep", "daily_sleep"),
             ("readiness", "daily_readiness"),
             ("activity", "daily_activity"),
-        ):
-            out[name] = await serve(
-                endpoint, days_back, start, start, raw=False, default_days=days_back
+        )
+        results = await asyncio.gather(
+            *(
+                serve(endpoint, days_back, start, start, raw=False, default_days=days_back)
+                for _, endpoint in endpoints
             )
-        return out
+        )
+        return {name: result for (name, _), result in zip(endpoints, results, strict=True)}
 
     def _safe(fn):
         """Ошибка ресурса не должна ломать загрузку контекста.

@@ -11,6 +11,7 @@ import json
 import sys
 
 from . import shaping
+from .auth import OuraOAuth, TokenStore
 from .client import OuraClient, OuraError
 from .config import ConfigError, load_settings
 from .dates import resolve_range
@@ -29,7 +30,11 @@ async def _run() -> int:
     start, end = resolve_range(settings.tz, days_back=7)
     failures = 0
 
-    async with OuraClient(settings) as client:
+    provider = None
+    if not settings.is_sandbox:
+        provider = OuraOAuth(settings, TokenStore(settings.token_store)).access_token
+
+    async with OuraClient(settings, provider) as client:
         for endpoint in CHECKS:
             try:
                 rows = await client.fetch(endpoint, start, end)

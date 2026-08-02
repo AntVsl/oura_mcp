@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from mcp.server.fastmcp import FastMCP
 
 from . import tools
@@ -17,6 +19,7 @@ from .config import Settings, load_settings
 def build(
     settings: Settings | None = None,
     token_provider: TokenProvider | None = None,
+    token_status: Callable[[], dict[str, object]] | None = None,
     owner_secret: str | None = None,
     **fastmcp_kwargs: object,
 ) -> FastMCP:
@@ -54,6 +57,7 @@ def build(
             # требует посимвольного совпадения "iss" в редиректе с "issuer" в
             # метаданных — не совпадёт, если взять исходный settings.public_url.
             issuer=str(auth_settings.issuer_url),
+            allowed_redirect_origins=settings.oauth_allowed_redirect_origins,
         )
         fastmcp_kwargs["auth_server_provider"] = provider
         fastmcp_kwargs["auth"] = auth_settings
@@ -63,7 +67,7 @@ def build(
         mcp = FastMCP("oura", **fastmcp_kwargs)
 
     _register_health(mcp)
-    tools.register(mcp, settings, token_provider)
+    tools.register(mcp, settings, token_provider, token_status)
     return mcp
 
 
@@ -81,4 +85,3 @@ def _register_health(mcp: FastMCP) -> None:
     @mcp.custom_route(HEALTH_PATH, methods=["GET"])
     async def healthz(_request):  # noqa: ANN001 — сигнатура задана starlette
         return PlainTextResponse("ok")
-

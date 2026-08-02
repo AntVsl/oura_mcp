@@ -15,7 +15,7 @@
 
 services:
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2025.2.1
     restart: unless-stopped
     # Токен несёт в себе учётные данные туннеля, поэтому приходит окружением, а
     # не аргументом командной строки: аргументы видны в `docker inspect` и в

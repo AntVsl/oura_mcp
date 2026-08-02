@@ -1,13 +1,13 @@
 [project]
 name = "my-oura-mcp"
-version = "0.4.0"
+version = "0.4.1"
 description = "MCP server for Oura Ring data: sleep, readiness, HRV, resting heart rate"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Anton Vasilev" }]
-keywords = ["mcp", "oura", "health", "sleep", "hrv", "claude", "wearable"]
+keywords = ["mcp", "oura", "health", "sleep", "hrv", "claude", "chatgpt", "codex", "wearable"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",

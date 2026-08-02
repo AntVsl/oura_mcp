@@ -8,6 +8,7 @@
 
 from datetime import date
 from pathlib import Path
+import stat
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -78,6 +79,12 @@ def test_empty_days_are_not_stored(cache):
 def test_rows_without_day_are_skipped(cache):
     """Поминутный пульс по суткам здесь не раскладывается."""
     assert cache.store("heartrate", [{"timestamp": "2026-07-28T10:00:00+00:00"}], TODAY) == 0
+
+
+def test_database_is_owner_readable_only(tmp_path):
+    path = tmp_path / "cache.db"
+    DayCache(path, "production")
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 # --- изоляция ----------------------------------------------------------------
@@ -214,6 +221,23 @@ async def test_refetched_day_does_not_double(tmp_path):
     assert days == sorted(days), "ответ должен остаться упорядоченным по дням"
     assert days.count("2026-07-21") == 1, "день не должен удвоиться"
     assert [r for r in got if r["day"] == "2026-07-21"][0]["score"] == 99, "свежее важнее"
+
+
+@respx.mock
+async def test_recent_completed_day_is_revalidated(tmp_path, monkeypatch):
+    """Вчерашняя частичная синхронизация не должна остаться в кэше навсегда."""
+    cache = DayCache(tmp_path / "c.db", "production")
+    cache.store("daily_sleep", [row("2026-07-29", 50)], TODAY)
+    route = respx.get(url__regex=r".*daily_sleep.*").mock(
+        return_value=httpx.Response(200, json={"data": [row("2026-07-29", 90)]})
+    )
+    monkeypatch.setattr("my_oura_mcp.client.today", lambda _tz: TODAY)
+    async with httpx.AsyncClient() as http:
+        client = OuraClient(settings(tmp_path), lambda: _token(), http=http, cache=cache)
+        got = await client.fetch("daily_sleep", date(2026, 7, 29), date(2026, 7, 29))
+
+    assert route.called
+    assert got == [row("2026-07-29", 90)]
 
 
 @respx.mock

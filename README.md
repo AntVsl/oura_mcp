@@ -4,11 +4,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 
-Gives Claude access to your Oura Ring data: sleep, readiness, HRV, resting
-heart rate, activity, SpO₂, stress.
+Gives Claude, ChatGPT, and Codex access to your Oura Ring data: sleep,
+readiness, HRV, resting heart rate, activity, SpO₂, stress.
 
-Ask "how did I sleep last week" and Claude calls the right tool and gets a
-summary back — not a wall of JSON:
+Ask "how did I sleep last week" and your MCP client calls the right tool and
+gets a summary back — not a wall of JSON:
 
 ```json
 {
@@ -23,12 +23,12 @@ summary back — not a wall of JSON:
 }
 ```
 
-> **New to MCP?** Model Context Protocol is how Claude reaches external data.
-> Install this server, connect it once, then just ask Claude about your sleep in
-> plain language. No coding involved.
+> **New to MCP?** Model Context Protocol lets AI clients reach external data.
+> Install this server, connect it once, then ask about your sleep in plain
+> language. No coding involved.
 
-Works in Claude Code in the terminal and in claude.ai — including the mobile
-app, once it's deployed to a server of your own.
+Works locally in Claude Code and Codex, and remotely in claude.ai and ChatGPT
+once it is deployed to a server of your own.
 
 *Читать по-русски: [README.ru.md](README.ru.md)*
 
@@ -64,13 +64,14 @@ Check that data flows (hits Oura's sandbox, no auth required):
 uv run python -m my_oura_mcp.smoke
 ```
 
-Connect it to Claude Code:
+Connect it locally to Claude Code or Codex:
 
 ```bash
 claude mcp add --scope user oura -- uv --directory /path/to/oura_mcp run my-oura-mcp
+codex mcp add oura -- uv --directory /path/to/oura_mcp run my-oura-mcp
 ```
 
-Then ask Claude for your Oura summary. The `get_status` tool reports which
+Then ask your client for an Oura summary. The `get_status` tool reports which
 mode the server is in.
 
 ## Tools
@@ -148,7 +149,8 @@ Everything lives in `.env` (see `.env.example`). Secrets never reach git.
 | `OURA_API_MODE` | `sandbox` (synthetic data) or `production` |
 | `OURA_TZ` | Timezone deciding what "today" means. **Set explicitly on servers** |
 | `OURA_MCP_TOKEN` | Shared secret guarding the HTTP endpoint; also the consent-page password |
-| `OURA_PUBLIC_URL` | Public `https` address. When set, enables OAuth for claude.ai |
+| `OURA_PUBLIC_URL` | Public `https` address. When set, enables OAuth for Claude.ai and ChatGPT |
+| `OURA_OAUTH_ALLOWED_REDIRECT_ORIGINS` | Comma-separated OAuth client origins; defaults to Claude.ai and ChatGPT |
 | `OURA_TOKEN_STORE` | Where the OAuth flow writes tokens. Not set by hand |
 | `OURA_CACHE_DB` | SQLite cache file. An empty value disables caching |
 
@@ -156,14 +158,15 @@ Everything lives in `.env` (see `.env.example`). Secrets never reach git.
 
 The same code serves both cases — only the transport differs.
 
-### Locally, in Claude Code
+### Locally, in Claude Code or Codex
 
 ```bash
 claude mcp add --scope user oura -- uv --directory /path/to/oura_mcp run my-oura-mcp
+codex mcp add oura -- uv --directory /path/to/oura_mcp run my-oura-mcp
 ```
 
-`--scope user` makes the server visible from any directory; without it, only
-from where you ran the command. Verify with `claude mcp list`.
+`--scope user` makes the Claude Code server visible from any directory; verify
+with `claude mcp list`. Verify the Codex connection with `codex mcp list`.
 
 ### Locally over HTTP, for debugging
 
@@ -175,12 +178,12 @@ No secret required on loopback.
 
 ### Remotely, reachable from anywhere
 
-This is what makes the server usable from any device, from claude.ai, and from
-the phone. You need a host with a public address and a domain of your own.
+This is what makes the server usable from any device, Claude.ai, and ChatGPT.
+You need a host with a public address and a domain of your own.
 
 The step-by-step runbook is **[docs/DEPLOY.md](docs/DEPLOY.md)** (Russian) — how
-to let traffic in, how to move Oura authorization onto the server, how to
-connect claude.ai. What follows is only what makes this path different.
+to let traffic in, how to move Oura authorization onto the server, and how to
+connect web clients. What follows is only what makes this path different.
 
 There are two ways to expose the server, and the choice is not cosmetic. Caddy
 with a Let's Encrypt certificate is simpler, but the certificate lands in
@@ -188,12 +191,16 @@ Certificate Transparency, a public log, which reveals that this address hosts a
 service. A Cloudflare Tunnel opens no inbound ports at all. If a VPN lives on
 the same host, only the tunnel will do.
 
-claude.ai connects over OAuth, which `OURA_PUBLIC_URL` turns on: the server
-becomes its own authorization server with dynamic client registration. No client
-ID or secret to enter in the connector dialog — Claude registers itself, and the
-consent page asks for the same `OURA_MCP_TOKEN`. The connector is added once on
-the web and is then available in every Claude client on the account, including
-the mobile app.
+Claude.ai and ChatGPT connect over OAuth, which `OURA_PUBLIC_URL` turns on:
+the server becomes its own authorization server with dynamic client
+registration. No client ID or secret is stored in the connector dialog; the
+client registers itself and the consent page asks for `OURA_MCP_TOKEN`.
+
+Dynamic OAuth registration is restricted to `https://claude.ai` and
+`https://chatgpt.com` by default. If another trusted client needs to connect,
+add only its exact origin to
+`OURA_OAUTH_ALLOWED_REDIRECT_ORIGINS`; the consent page shows the client and
+return origin before asking for the secret.
 
 Claude Code connects from any machine with a header, no OAuth involved:
 
@@ -203,13 +210,27 @@ claude mcp add --scope user --transport http oura https://your-domain/mcp --head
 
 Without the header, or with a wrong token, the endpoint answers `401`.
 
+Codex can use the same remote endpoint with the token kept in its environment:
+
+```bash
+export OURA_MCP_TOKEN=YOUR_TOKEN
+codex mcp add oura --url https://your-domain/mcp --bearer-token-env-var OURA_MCP_TOKEN
+```
+
+For ChatGPT, enable developer mode, then create a custom app in **Settings →
+Apps → Create** with `https://your-domain/mcp`, select OAuth, and complete the
+consent prompt while tools are scanned. ChatGPT connects to remote MCP servers;
+it cannot connect directly to a local process. See [the deployment runbook](docs/DEPLOY.md).
+
 ### Which one
 
 | | stdio, local | HTTP, remote |
 |---|---|---|
 | Claude Code on this machine | yes | yes |
+| Codex on this machine | yes | yes |
 | Other devices | no | yes |
 | claude.ai in the browser | no | yes |
+| ChatGPT in the browser | no | yes |
 | Needs a domain and a host | no | yes |
 | Data leaves the machine | no | yes, to your host |
 
@@ -242,6 +263,8 @@ API yourself:
 
 - `.env`, the token store and the cache are in `.gitignore`. Verify before
   committing: `git status --porcelain`.
+- The token store and SQLite cache are written with owner-only (`600`) file
+  permissions.
 - The HTTP endpoint is guarded by `OURA_MCP_TOKEN` using a constant-time
   comparison. The access model is deliberately simple: one secret, one owner,
   no per-user separation.
@@ -254,9 +277,9 @@ API yourself:
 
 ## Caching
 
-Past days in Oura are immutable, so they go into SQLite and are never requested
-again. Asking for the same fortnight twice sends only today over the network; a
-purely historical window makes no request at all.
+Older days go into SQLite. The two most recent completed days are rechecked on
+every request because late syncs can update them; older history is served from
+the cache without a network call.
 
 ```bash
 uv run my-oura-mcp cache --status   # what is cached
@@ -271,9 +294,15 @@ key**, so sandbox data cannot surface in production.
 
 Per-minute heart rate bypasses the cache: its rows carry no `day` field.
 
+## MCP resources
+
+Clients that support resources can read `oura://today`, `oura://yesterday`,
+and `oura://week`. They provide the same sleep/readiness/activity summaries
+as the tools, without choosing arguments manually.
+
 ## Skill with recipes
 
-[skills/oura](skills/oura) ships a Claude skill — not more tools, but workflows
+[skills/oura](skills/oura) ships a Claude-oriented skill — not more tools, but workflows
 on top of them: whether sleep is actually improving, whether today can take
 load, what the body was doing on a bad day, whether a change in routine did
 anything. Each is a sequence of calls plus a way to reason about the answer,
@@ -287,6 +316,17 @@ cp -r skills/oura ~/.claude/skills/
 
 The recipes are checked against the code by tests: a field name that no tool
 returns fails `uv run pytest` instead of quietly sending the model nowhere.
+
+Codex can also load these repository skills after copying them to its skills
+directory:
+
+```bash
+mkdir -p ~/.codex/skills
+cp -R skills/oura skills/oura-mcp-maintenance ~/.codex/skills/
+```
+
+`oura` interprets data through the MCP server. `oura-mcp-maintenance` guides
+safe changes to this repository and its Claude/ChatGPT/Codex integration.
 
 ## When something doesn't work
 
@@ -339,6 +379,9 @@ Tests never touch the network; Oura's responses are stubbed with `respx`.
 Tool tests go through `mcp.call_tool()` rather than calling the functions
 directly — some bugs only appear on the real protocol layer, where MCP clients
 pass declared defaults as explicit arguments.
+
+For Codex and other coding agents, repository instructions and a task/review
+structure live in [AGENTS.md](AGENTS.md) and [docs/agents](docs/agents/README.md).
 
 **x86_64 macOS:** `cryptography` 49+ ships no wheel for this platform and tries
 to build from Rust sources. `pyproject.toml` pins `48.0.0` for it specifically;

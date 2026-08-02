@@ -1,9 +1,10 @@
 """Кэш завершённых суток в SQLite.
 
-Прошедший день в Oura неизменяем: показатели за вчера уже не пересчитаются.
-Значит его можно один раз положить в базу и больше не спрашивать. Выигрыш
-заметен на длинных периодах — полгода трендов перестают быть сотнями обращений
-к API — и заодно данные за прошлое остаются доступны при обрыве сети.
+Старые дни Oura меняются редко, но поздняя синхронизация способна обновить
+недавнюю дату. Поэтому клиент повторно проверяет два последних завершённых дня,
+а всё более старое хранит в базе. Выигрыш заметен на длинных периодах — полгода
+трендов перестают быть сотнями обращений к API — и данные остаются доступны при
+обрыве сети.
 
 Четыре решения, каждое из которых легко сделать тихо-неправильно.
 
@@ -29,6 +30,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
@@ -68,7 +70,12 @@ class DayCache:
             return None
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            # Здесь лежат медицинские показатели. Права SQLite по umask обычно
+            # 0644, поэтому права файла задаём явно. Каталог намеренно не
+            # меняем: пользователь мог указать существующий общий путь вроде
+            # /tmp, и chmod родителя там был бы опасным побочным эффектом.
             conn = sqlite3.connect(self.path, timeout=5.0)
+            os.chmod(self.path, 0o600)
             conn.row_factory = sqlite3.Row
             return conn
         except (sqlite3.Error, OSError):
@@ -135,6 +142,47 @@ class DayCache:
             with conn:
                 conn.executemany(
                     "INSERT OR REPLACE INTO days (mode, endpoint, day, payload, cached_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    [
+                        (self.mode, endpoint, day, json.dumps(items), now)
+                        for day, items in by_day.items()
+                    ],
+                )
+            return len(by_day)
+        except (sqlite3.Error, ValueError):
+            return 0
+        finally:
+            conn.close()
+
+    def replace_range(
+        self, endpoint: str, rows: list[Row], start: date, end: date, today: date
+    ) -> int:
+        """Заменяет закэшированные дни успешным свежим ответом.
+
+        В отличие от ``store`` удаляет и день, для которого API теперь отдал
+        пустоту: иначе старый частичный ответ переживал бы повторную проверку.
+        """
+        by_day: dict[str, list[Row]] = {}
+        for row in rows:
+            day = row.get("day")
+            if isinstance(day, str) and day < today.isoformat():
+                by_day.setdefault(day, []).append(row)
+
+        conn = self._connect()
+        if conn is None:
+            return 0
+        try:
+            import time
+
+            with conn:
+                conn.execute(
+                    "DELETE FROM days WHERE mode = ? AND endpoint = ? "
+                    "AND day BETWEEN ? AND ? AND day < ?",
+                    (self.mode, endpoint, start.isoformat(), end.isoformat(), today.isoformat()),
+                )
+                now = int(time.time())
+                conn.executemany(
+                    "INSERT INTO days (mode, endpoint, day, payload, cached_at) "
                     "VALUES (?, ?, ?, ?, ?)",
                     [
                         (self.mode, endpoint, day, json.dumps(items), now)

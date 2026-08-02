@@ -27,7 +27,9 @@ jobs:
           enable-cache: true
 
       - name: Install project
-        run: uv sync --extra dev --python ${{ matrix.python-version }}
+        run: |
+          uv lock --check
+          uv sync --frozen --extra dev --python ${{ matrix.python-version }}
 
       # Тесты не ходят в сеть: все ответы Oura подставляются через respx.
       - name: Run tests

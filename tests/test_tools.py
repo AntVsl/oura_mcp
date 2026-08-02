@@ -42,6 +42,22 @@ async def call(name: str, args: dict):
     return res[1] if isinstance(res, tuple) else res
 
 
+async def test_status_is_not_authorized_when_production_tokens_are_missing(tmp_path):
+    production = Settings(
+        mode="production",
+        tz=MSK,
+        client_id="id",
+        client_secret="secret",
+        redirect_uri="http://localhost:8765/callback",
+        token_store=tmp_path / "missing.json",
+        cache_db=None,
+    )
+    mcp = build(production, token_provider=lambda: _token(), token_status=lambda: {"authorized": False})
+    result = await mcp.call_tool("get_status", {})
+    out = result[1] if isinstance(result, tuple) else result
+    assert out["authorized"] is False
+
+
 # --- регрессия: MCP-клиент подставляет объявленный default как явный аргумент
 
 

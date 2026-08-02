@@ -44,6 +44,13 @@ def test_path_is_absolute():
     assert "--directory ~" not in out
 
 
+def test_installed_package_uses_its_entrypoint_not_a_fake_project_root():
+    out = install.render(settings(), None)
+    assert "claude mcp add oura -- my-oura-mcp" in out
+    assert "codex mcp add oura -- my-oura-mcp" in out
+    assert "--directory" not in out
+
+
 def test_claude_desktop_snippet_is_valid_json():
     """Невалидный JSON в подсказке хуже отсутствия подсказки."""
     out = install.render(settings(), ROOT)
@@ -64,6 +71,14 @@ def test_local_setup_still_shown_when_deployed():
     """Локальный запуск остаётся рабочим вариантом и не должен пропадать."""
     out = install.render(settings("https://oura-mcp.lol"), ROOT)
     assert "claude mcp add oura --" in out
+    assert "codex mcp add oura --" in out
+
+
+def test_remote_setup_includes_codex_and_chatgpt():
+    out = install.render(settings("https://oura-mcp.lol"), ROOT)
+    assert "codex mcp add oura --url https://oura-mcp.lol/mcp" in out
+    assert "--bearer-token-env-var OURA_MCP_TOKEN" in out
+    assert "ChatGPT" in out
 
 
 def test_no_remote_block_without_public_url():

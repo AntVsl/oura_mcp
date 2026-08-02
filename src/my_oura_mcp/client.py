@@ -67,6 +67,9 @@ ENDPOINT_SCOPES = {
 
 MAX_ATTEMPTS = 4
 MAX_PAGES = 50
+# Oura продолжает присылать изменения после синхронизации. Повторно проверяем
+# две последние завершённые даты, а не считаем их неизменяемыми навсегда.
+CACHE_REVALIDATE_DAYS = 2
 TIMEOUT = httpx.Timeout(30.0, connect=15.0)
 
 TokenProvider = Callable[[], Awaitable[str]]
@@ -157,6 +160,11 @@ class OuraClient:
     ) -> list[dict[str, Any]]:
         assert self._cache is not None
         cached = self._cache.lookup(endpoint, start, end)
+        current_day = today(self._settings.tz)
+        revalidate_from = (current_day - timedelta(days=CACHE_REVALIDATE_DAYS)).isoformat()
+        # Не используем даже имеющийся кэш для свежих завершённых дней. Если
+        # API теперь вернул пустоту, replace_range ниже удалит старую запись.
+        cached = {day: rows for day, rows in cached.items() if day < revalidate_from}
         missing = [d for d in days_between(start, end) if d.isoformat() not in cached]
 
         if not missing:
@@ -167,7 +175,7 @@ class OuraClient:
         # Дырка посередине приведёт к перезапросу уже известных суток — это
         # дешевле, чем дробить диапазон на куски и слать несколько запросов.
         fresh = await self._fetch_remote(endpoint, min(missing), max(missing), None)
-        self._cache.store(endpoint, fresh, today(self._settings.tz))
+        self._cache.replace_range(endpoint, fresh, min(missing), max(missing), current_day)
 
         fresh_by_day: dict[str, list[dict[str, Any]]] = {}
         for row in fresh:

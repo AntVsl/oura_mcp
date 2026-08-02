@@ -41,6 +41,13 @@ def test_stats_include_trend_when_enough_points():
     assert stats["trend_per_week"] > 0, "ряд растёт — тренд должен быть положительным"
 
 
+def test_daily_sleep_sorts_api_rows_before_calculating_trend():
+    """Пагинация/API не обязаны вернуть дни в хронологическом порядке."""
+    out = shaping.daily_sleep(list(reversed(DAILY_SLEEP)))
+    assert out["period"] == {"start": "2026-07-20", "end": "2026-07-23", "days": 4}
+    assert out["stats"]["score"]["trend_per_week"] > 0
+
+
 def test_trend_omitted_for_short_series():
     assert "trend_per_week" not in shaping.daily_sleep(DAILY_SLEEP[:2])["stats"]["score"]
 

@@ -1,10 +1,9 @@
-"""Сервер авторизации OAuth 2.1 — вход для claude.ai.
+"""Сервер авторизации OAuth 2.1 для удалённых MCP-клиентов.
 
-Зачем он нужен. У claude.ai два способа аутентифицироваться в стороннем
-MCP-сервере: статический заголовок и OAuth. Первый (`static_headers`) — beta с
-ограниченной раскаткой, и в диалоге добавления коннектора поля для него может
-не быть вовсе. Тогда остаётся OAuth, причём непременно с динамической
-регистрацией: Claude регистрируется сам, вручную вписать client_id некуда.
+Зачем он нужен. Веб-клиенты MCP, такие как Claude.ai и ChatGPT, подключаются
+к публичному серверу через OAuth. Клиент регистрируется динамически, поэтому
+client_id не нужно переносить в интерфейс сервиса вручную. CLI-клиенты могут
+вместо этого использовать общий Bearer-токен.
 
 Чего здесь НЕТ, и это намеренно. Весь протокольный слой уже реализован в
 официальном SDK — `mcp.server.auth`, — и дублировать его было бы не только
@@ -34,6 +33,7 @@ import json
 import os
 import secrets
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -50,8 +50,8 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse
 
-# Access-токен живёт час: Claude обновляет его сам, реактивно по 401 и
-# заранее за пять минут до истечения, так что короткий срок ничего не стоит.
+# Access-токен живёт час: MCP-клиент обновляет его по 401 или заранее, поэтому
+# короткий срок не ухудшает опыт пользователя.
 ACCESS_TTL_SEC = 3600
 
 # Код обменивается за секунды. Минута — запас на неспешную сеть, не больше:
@@ -67,6 +67,9 @@ PENDING_TTL_SEC = 600
 # оставляло бы в хранилище запись навсегда. Три месяца — с запасом больше
 # любого разумного простоя телефона, так что переспрашивать секрет не придётся.
 REFRESH_TTL_SEC = 90 * 24 * 3600
+MAX_PENDING_CLIENTS = 64
+MAX_PENDING_AUTHORIZATIONS = 64
+MAX_CONSENT_ATTEMPTS = 5
 
 # Исходы согласия. Их три, а не два, потому что «протухла заявка» и «неверный
 # секрет» требуют разных действий от человека: в первом случае надо начать
@@ -75,6 +78,15 @@ REFRESH_TTL_SEC = 90 * 24 * 3600
 GRANT_OK = "ok"
 GRANT_BAD_SECRET = "bad_secret"
 GRANT_STALE = "stale"
+
+
+@dataclass
+class PendingAuthorization:
+    client_id: str
+    params: AuthorizationParams
+    expires_at: float
+    client_name: str
+    attempts: int = 0
 
 
 class OAuthStore:
@@ -174,29 +186,49 @@ class OuraAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refre
         owner_secret: str,
         issuer: str,
         consent_path: str = "/oauth/consent",
+        allowed_redirect_origins: frozenset[str] | None = None,
     ) -> None:
         self._store = store
         self._owner_secret = owner_secret
         self._issuer = issuer
         self._consent_path = consent_path
+        self._allowed_redirect_origins = allowed_redirect_origins
         # Заявки на авторизацию живут минуты и переживать перезапуск не должны:
         # незавершённое согласие после рестарта честнее начать заново.
-        self._pending: dict[str, tuple[str, AuthorizationParams, float]] = {}
+        self._pending: dict[str, PendingAuthorization] = {}
+        # DCR-клиент становится постоянным только после подтверждения секретом.
+        # Так публичный /register не может бесконечно раздувать oauth.json.
+        self._pending_clients: dict[str, tuple[OAuthClientInformationFull, float]] = {}
         # Коды — тоже в памяти и по той же причине.
         self._codes: dict[str, AuthorizationCode] = {}
 
     # --- регистрация клиента (DCR) -----------------------------------------
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
+        self._sweep()
         raw = self._store.get("clients", client_id)
-        return OAuthClientInformationFull.model_validate(raw) if raw else None
+        if raw:
+            return OAuthClientInformationFull.model_validate(raw)
+        transient = self._pending_clients.get(client_id)
+        return transient[0] if transient else None
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         # Регистрация открытая, и это осознанно. Единственное, что даёт
         # регистрация, — возможность начать флоу; закончить его без
         # OURA_MCP_TOKEN всё равно нельзя. Закрывать её значило бы требовать
         # секрет ещё и здесь, а Claude на этом шаге его предъявить не может.
-        self._store.put("clients", client_info.client_id, client_info.model_dump(mode="json"))
+        self._sweep()
+        self._validate_redirect_origins(client_info)
+        if (
+            client_info.client_id not in self._pending_clients
+            and self._store.get("clients", client_info.client_id) is None
+            and len(self._pending_clients) >= MAX_PENDING_CLIENTS
+        ):
+            raise ValueError("слишком много незавершённых регистраций OAuth-клиентов")
+        self._pending_clients[client_info.client_id] = (
+            client_info,
+            time.time() + PENDING_TTL_SEC,
+        )
 
     # --- согласие -----------------------------------------------------------
 
@@ -208,8 +240,15 @@ class OuraAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refre
         «провайдер личности» — форма с этим секретом.
         """
         self._sweep()
+        if len(self._pending) >= MAX_PENDING_AUTHORIZATIONS:
+            raise ValueError("слишком много незавершённых OAuth-заявок")
         request_id = secrets.token_urlsafe(24)
-        self._pending[request_id] = (client.client_id, params, time.time() + PENDING_TTL_SEC)
+        self._pending[request_id] = PendingAuthorization(
+            client_id=client.client_id,
+            params=params,
+            expires_at=time.time() + PENDING_TTL_SEC,
+            client_name=client.client_name or client.client_id,
+        )
         return f"{self._consent_path}?request={request_id}"
 
     def redirect_origin(self, request_id: str) -> str | None:
@@ -227,8 +266,16 @@ class OuraAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refre
         entry = self._pending.get(request_id)
         if entry is None:
             return None
-        parsed = urlsplit(str(entry[1].redirect_uri))
+        parsed = urlsplit(str(entry.params.redirect_uri))
         return f"{parsed.scheme}://{parsed.netloc}"
+
+    def consent_details(self, request_id: str) -> tuple[str | None, str | None]:
+        """Имя клиента и origin возврата для осмысленного согласия."""
+        self._sweep()
+        entry = self._pending.get(request_id)
+        if entry is None:
+            return None, None
+        return entry.client_name, self.redirect_origin(request_id)
 
     def grant(self, request_id: str, presented_secret: str) -> tuple[str | None, str]:
         """Проверяет секрет и выдаёт код.
@@ -253,9 +300,18 @@ class OuraAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refre
 
         # Постоянное время: обычное сравнение выдаёт длину общего префикса.
         if not secrets.compare_digest(presented_secret, self._owner_secret):
+            entry.attempts += 1
+            if entry.attempts >= MAX_CONSENT_ATTEMPTS:
+                self._pending.pop(request_id, None)
+                self._pending_clients.pop(entry.client_id, None)
+                return None, GRANT_STALE
             return None, GRANT_BAD_SECRET
 
-        client_id, params, _ = self._pending.pop(request_id)
+        entry = self._pending.pop(request_id)
+        client_id, params = entry.client_id, entry.params
+        transient = self._pending_clients.pop(client_id, None)
+        if transient is not None:
+            self._store.put("clients", client_id, transient[0].model_dump(mode="json"))
         code = secrets.token_urlsafe(32)  # 256 бит, вчетверо выше требуемого RFC 6749
         self._codes[code] = AuthorizationCode(
             code=code,
@@ -287,8 +343,23 @@ class OuraAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Refre
         утечка, которую в норме никто не заметит.
         """
         now = time.time()
-        self._pending = {k: v for k, v in self._pending.items() if v[2] > now}
+        self._pending = {k: v for k, v in self._pending.items() if v.expires_at > now}
+        self._pending_clients = {
+            k: v for k, v in self._pending_clients.items() if v[1] > now
+        }
         self._codes = {k: v for k, v in self._codes.items() if v.expires_at > now}
+
+    def _validate_redirect_origins(self, client_info: OAuthClientInformationFull) -> None:
+        if self._allowed_redirect_origins is None:
+            return
+        origins = {
+            f"{parsed.scheme}://{parsed.netloc}"
+            for uri in client_info.redirect_uris
+            if (parsed := urlsplit(str(uri))).scheme and parsed.netloc
+        }
+        if not origins or not origins.issubset(self._allowed_redirect_origins):
+            allowed = ", ".join(sorted(self._allowed_redirect_origins))
+            raise ValueError(f"redirect URI клиента не входит в разрешённые origins: {allowed}")
 
     # --- обмен кода на токены ----------------------------------------------
 
@@ -441,8 +512,8 @@ CONSENT_HTML = """<!doctype html>
 </style></head>
 <body><main>
 <h1>Доступ к данным Oura</h1>
-<p>Claude просит доступ к твоим показателям сна и восстановления.
-Подтверди секретом сервера.</p>
+<p><strong>{client_name}</strong> запрашивает доступ к твоим показателям сна и
+восстановления. После подтверждения браузер вернётся на <code>{redirect_origin}</code>.</p>
 {error}
 <form method="post">
   <input type="hidden" name="request" value="{request_id}">
@@ -527,7 +598,10 @@ CONSENT_HEADERS = consent_headers()
 
 
 def _consent_page(
-    request_id: str, error: bool = False, redirect_origin: str | None = None
+    request_id: str,
+    error: bool = False,
+    redirect_origin: str | None = None,
+    client_name: str | None = None,
 ) -> HTMLResponse:
     """Страница согласия с экранированным идентификатором заявки.
 
@@ -540,6 +614,8 @@ def _consent_page(
         CONSENT_HTML.format(
             request_id=html.escape(request_id, quote=True),
             error=ERROR_BLOCK if error else "",
+            client_name=html.escape(client_name or "OAuth-клиент", quote=True),
+            redirect_origin=html.escape(redirect_origin or "неизвестный адрес", quote=True),
         ),
         status_code=401 if error else 200,
         headers=consent_headers(redirect_origin),
@@ -557,14 +633,15 @@ def register_consent_route(mcp, provider: OuraAuthProvider, path: str = "/oauth/
     async def consent(request: Request):
         if request.method == "GET":
             request_id = request.query_params.get("request", "")
+            client_name, origin = provider.consent_details(request_id)
             return _consent_page(
-                request_id, redirect_origin=provider.redirect_origin(request_id)
+                request_id, redirect_origin=origin, client_name=client_name
             )
 
         form = await request.form()
         request_id = str(form.get("request", ""))
         # Origin читаем ДО grant(): успешный grant заявку снимает.
-        origin = provider.redirect_origin(request_id)
+        client_name, origin = provider.consent_details(request_id)
         redirect, reason = provider.grant(request_id, str(form.get("password", "")))
         if reason == GRANT_STALE:
             # Форму не показываем: этот request_id мёртв, и повторный ввод
@@ -573,7 +650,12 @@ def register_consent_route(mcp, provider: OuraAuthProvider, path: str = "/oauth/
             # правильном секрете.
             return HTMLResponse(STALE_HTML, status_code=410, headers=CONSENT_HEADERS)
         if redirect is None:
-            return _consent_page(request_id, error=True, redirect_origin=origin)
+            return _consent_page(
+                request_id,
+                error=True,
+                redirect_origin=origin,
+                client_name=client_name,
+            )
         # 303: после POST браузер обязан пойти GET'ом, иначе повторная отправка
         # формы по «назад» уткнётся в уже потраченную заявку.
         return RedirectResponse(redirect, status_code=303)

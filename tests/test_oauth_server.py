@@ -20,6 +20,7 @@ from mcp.shared.auth import OAuthClientInformationFull
 from my_oura_mcp.oauth_server import (
     GRANT_BAD_SECRET,
     GRANT_STALE,
+    MAX_CONSENT_ATTEMPTS,
     AdvertisePublicClients,
     OAuthStore,
     OuraAuthProvider,
@@ -78,8 +79,34 @@ async def test_registered_client_round_trips(provider, client):
     assert str(loaded.redirect_uris[0]) == REDIRECT
 
 
+async def test_unconfirmed_registration_is_not_persisted(provider, client, store_path):
+    """Публичный DCR не должен давать неограниченно раздувать oauth.json."""
+    await provider.register_client(client)
+    assert not store_path.exists()
+
+
+async def test_confirmed_registration_is_persisted(provider, client, store_path):
+    await provider.register_client(client)
+    await _authorized(provider, client)
+    assert "cid" in json.loads(store_path.read_text())["clients"]
+
+
 async def test_unknown_client_is_none(provider):
     assert await provider.get_client("nope") is None
+
+
+async def test_registration_rejects_untrusted_redirect_origin(store_path, client):
+    guarded = OuraAuthProvider(
+        OAuthStore(store_path),
+        SECRET,
+        issuer="https://oura-mcp.lol/",
+        allowed_redirect_origins=frozenset({"https://claude.ai"}),
+    )
+    untrusted = client.model_copy(
+        update={"redirect_uris": [AnyUrl("https://evil.example/callback")]}
+    )
+    with pytest.raises(ValueError, match="разрешённые origins"):
+        await guarded.register_client(untrusted)
 
 
 # --- согласие ---------------------------------------------------------------
@@ -94,6 +121,18 @@ async def test_near_miss_secret_rejected(provider, client):
     """Секрет сверяется целиком, а не по префиксу."""
     assert await _authorized(provider, client, secret=SECRET[:-1]) is None
     assert await _authorized(provider, client, secret=SECRET + "x") is None
+
+
+async def test_wrong_secret_has_a_bounded_number_of_attempts(provider, client):
+    params = AuthorizationParams(
+        state=None, scopes=[], code_challenge="chal",
+        redirect_uri=AnyUrl(REDIRECT), redirect_uri_provided_explicitly=True,
+    )
+    url = await provider.authorize(client, params)
+    request_id = url.split("request=")[1]
+    for _ in range(MAX_CONSENT_ATTEMPTS - 1):
+        assert provider.grant(request_id, "wrong") == (None, GRANT_BAD_SECRET)
+    assert provider.grant(request_id, "wrong") == (None, GRANT_STALE)
 
 
 async def test_grant_returns_code_and_preserves_state(provider, client):
@@ -256,6 +295,7 @@ async def test_survives_restart(provider, client, store_path):
 
 async def test_store_is_owner_only(provider, client, store_path):
     await provider.register_client(client)
+    await _authorized(provider, client)
     assert store_path.stat().st_mode & 0o777 == 0o600
 
 
